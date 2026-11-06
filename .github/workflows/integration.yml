@@ -60,7 +60,6 @@ jobs:
     # The called job can only get the permissions given here.
     permissions:
       id-token: write # Let _shared.yml log in to OpenBao with an OIDC token
-      contents: read # Let the action read the repository
       pull-requests: write # Required by _shared.yml; unused in a dry run
       issues: write # Required by _shared.yml; unused in a dry run
     uses: $/.github/workflows/_shared.yml

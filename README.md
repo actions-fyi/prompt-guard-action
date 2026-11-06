@@ -27,7 +27,6 @@ jobs:
   screen:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
       pull-requests: write
       issues: write
     outputs:
@@ -94,11 +93,12 @@ never by interpolation into the script.
 
 | Permission | Why |
 | --- | --- |
-| `contents: read` | The minimum for the job. |
 | `pull-requests: write` | Label a flagged pull request and convert it to a draft. |
 | `issues: write` | Comment on the pull request, or open and comment on the escalation issue. |
 
-A dry run makes no GitHub API calls, so it needs none of them. The token of a `pull_request` run
+The action reads nothing from the repository, so it needs no `contents: read`; a job that checks
+out the repository, e.g. to save files to screen, needs it for the checkout. A dry run makes no
+GitHub API calls, so it needs none of them. The token of a `pull_request` run
 from a fork is read-only, so escalation fails there; see [Escalation](#escalation).
 
 ## Audit, block and dry run
@@ -159,16 +159,16 @@ into overlapping segments.
 
 ## The reusable workflow, with OpenBao and Cloudflare Access
 
-[`.github/workflows/_shared.yml`](.github/workflows/_shared.yml) wraps the action for a
-deployment that keeps its secrets in [OpenBao](https://openbao.org) and has Cloudflare Access in
-front of TEI:
+[`.github/workflows/_shared.yml`](.github/workflows/_shared.yml) wraps the action for the
+actions-fyi deployment: TEI at `promptguard.actions.fyi` behind Cloudflare Access, and its
+secrets in [OpenBao](https://openbao.org) at `secrets.actions.fyi`. Repositories in actions-fyi
+call it like this:
 
 ```yaml
 jobs:
   screen:
     permissions:
       id-token: write
-      contents: read
       pull-requests: write
       issues: write
     uses: actions-fyi/prompt-guard-action/.github/workflows/_shared.yml@v1
@@ -178,29 +178,42 @@ jobs:
       payload-fields: pull_request.title, pull_request.body
 ```
 
+Text that isn't in the payload goes in an artifact: upload it earlier in the same run and pass
+`artifact` with its name and `files` with `name=path` pairs inside it. The workflow downloads it
+into a fresh, empty directory and screens those files.
+
 It logs in to OpenBao with the job's OIDC token
 ([hashicorp/vault-action](https://github.com/hashicorp/vault-action)), reads TEI's API key and,
 when `PROMPT_GUARD_CLIENT_ID` is set, the Access client secret, and passes them straight to the
 action. They never reach a job output, the environment or a file.
 
-- **Configuration variables**: `PROMPT_GUARD_ADDRESS` (TEI) and `SECRETS_ADDRESS` (OpenBao), the
-  defaults of the inputs `address` and `secrets-address`.
+**Everything that decides where the secrets go is a constant in the file, not an input**: the
+TEI and OpenBao addresses, the JWT audience, the auth method, path and role, and the secret paths.
+OpenBao hands the secrets to this file, whoever calls it, so a caller that could set the TEI
+address would receive the API key, and one that could set the OpenBao address and the audience
+would receive an OIDC token that the real role accepts. Configuration variables don't help: in a
+called workflow, `vars` are the caller's. The job's harden-runner also blocks every host except
+TEI, OpenBao and `api.github.com`, besides the GitHub and StepSecurity hosts that harden-runner
+always allows. **Other organisations copy `_shared.yml` and set their own constants and allowed
+endpoints, or use the action directly.**
+
 - **OpenBao**: a JWT auth method at `github-actions` with the issuer
   `https://token.actions.githubusercontent.com`, and a role `prompt-guard` with
-  `bound_audiences` set to the OpenBao URL (or the `jwt-audience` input) and `bound_claims` on
+  `bound_audiences` set to `https://secrets.actions.fyi` and `bound_claims` on
   `job_workflow_ref`:
   `actions-fyi/prompt-guard-action/.github/workflows/_shared.yml@refs/heads/main`,
   `…@refs/heads/gh-readonly-queue/main/*` and `…@refs/tags/v*`. Binding the role to this file,
   rather than to the callers, lets any repository call it while only this file's reviewed refs get
   the secrets. Its policy reads `ci/data/prompt-guard-api` (key `api_key`) and
-  `ci/data/prompt-guard-access` (key `client_secret`); the inputs `api-key-secret` and
-  `access-secret` change these.
+  `ci/data/prompt-guard-access` (key `client_secret`).
 - **Access in front of TEI**: a service token whose client ID is the GitHub secret
   `PROMPT_GUARD_CLIENT_ID` and whose client secret is in OpenBao. Neither store alone holds a
   working token. Leave `PROMPT_GUARD_CLIENT_ID` unset where TEI has no Access gate, e.g. for
   internal runners.
 - **Access in front of OpenBao**, if any: the secrets `CF_ACCESS_CLIENT_ID` and
   `CF_ACCESS_CLIENT_SECRET`, sent to OpenBao only when both are set.
+- **Permissions**: `id-token: write` for OpenBao, and `pull-requests: write` and `issues: write`
+  for escalation. Downloading an artifact of the same run needs none.
 
 ## Threat model
 
