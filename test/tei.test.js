@@ -2,8 +2,8 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { TRIGGER, tokenize, mockTei, filler, noSleep } = require('./helpers');
-const { createClient, parseInfo, batches, segmentText, cutWindows, scoreText, TeiError } = require('../src/tei');
+const { TRIGGER, json, tokenize, mockTei, filler, noSleep } = require('./helpers');
+const { createClient, parseInfo, batches, segmentText, cutWindows, fitWindows, scoreText, TeiError } = require('../src/tei');
 
 const info = { maxInputLength: 512, maxClientBatchSize: 32, labels: ['BENIGN', 'MALICIOUS'] };
 const client = (tei) => createClient({ address: 'https://tei.example.test/', apiKey: 'k', fetch: tei.fetch, sleep: noSleep });
@@ -152,4 +152,56 @@ test('a request that times out is aborted, retried twice, then a TeiError', asyn
     clearInterval(keepAlive);
   }
   assert.equal(attempts, 3);
+});
+
+// /tokenize answers that scoreText must refuse, each with the message it gives.
+const badTokenizeAnswers = [
+  ['not an array', () => ({ tokens: [] }), /expected one token list per input/],
+  ['one list too few', (inputs) => inputs.slice(1).map((input) => tokenize(input)), /expected one token list per input/],
+  ['a list that is not an array', (inputs) => inputs.map(() => 'tokens'), /a token list is not an array/],
+  ['a token without the special flag', (inputs) => inputs.map(() => [{ id: 1, text: 'x', start: 0, stop: 1 }]), /no special flag/],
+  ['a token that is not an object', (inputs) => inputs.map(() => [null]), /no special flag/],
+  ['a text token without offsets', (inputs) => inputs.map(() => [{ id: 1, text: 'x', special: false, start: null, stop: null }]), /no start and stop offsets/],
+  ['a text token with negative offsets', (inputs) => inputs.map(() => [{ id: 1, text: 'x', special: false, start: -1, stop: 1 }]), /no start and stop offsets/],
+  ['a text token that ends before it starts', (inputs) => inputs.map(() => [{ id: 1, text: 'x', special: false, start: 3, stop: 1 }]), /no start and stop offsets/],
+  ['offsets past the end of the text', (inputs) => inputs.map((input) => [{ id: 1, text: 'x', special: false, start: 0, stop: Buffer.byteLength(input) + 5 }]), /offsets outside the text/],
+];
+for (const [name, answer, message] of badTokenizeAnswers) {
+  test(`a /tokenize answer with ${name} is refused`, async () => {
+    const tei = mockTei({
+      override: (path, init) => (path === '/tokenize' ? json(answer(JSON.parse(init.body).inputs)) : undefined),
+    });
+    await assert.rejects(scoreText(client(tei), info, 'What is the capital of France?', 'MALICIOUS'), (error) => error instanceof TeiError && message.test(error.message));
+    assert.equal(tei.calls.filter((c) => c.path === '/predict').length, 0);
+  });
+}
+
+test('a window that never fits is split at most MAX_SPLITS times, then refused', async () => {
+  // Every input tokenizes to more than max_input_length tokens, however short it is.
+  let tokenizations = 0;
+  const stubborn = {
+    tokenize: async (inputs) => {
+      tokenizations += inputs.length;
+      return inputs.map((input) => [
+        ...Array.from({ length: 600 }, (_, i) => ({ id: 5, special: false, start: 0, stop: Buffer.byteLength(input) })),
+      ]);
+    },
+  };
+  await assert.rejects(fitWindows(stubborn, info, ['some window text']), /still has too many tokens after splitting/);
+  // One round per split, and the windows double each round: 1 + 2 + 4 + 8.
+  assert.equal(tokenizations, 15);
+});
+
+test('an injection straddling a segment boundary is seen whole by the next segment', async () => {
+  // max_input_length 64 gives segments of 12,800 characters, overlapping by 3,200.
+  const small = { ...info, maxInputLength: 64 };
+  const tei = mockTei({ maxInputLength: 64 });
+  const before = 'a'.repeat(12_790 - 1) + ' ';
+  const text = before + TRIGGER + ' ' + 'b '.repeat(4000);
+  assert.ok(before.length < 12_800 && before.length + TRIGGER.length > 12_800, 'the trigger straddles the first cut');
+  const result = await scoreText(client(tei), small, text, 'MALICIOUS');
+  assert.ok(result.score > 0.99);
+  const segments = tei.calls.find((c) => c.path === '/tokenize').body.inputs;
+  assert.ok(segments.length >= 2);
+  assert.ok(!segments[0].includes(TRIGGER) && segments[1].includes(TRIGGER));
 });
