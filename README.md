@@ -75,6 +75,7 @@ couldn't be scored, and empty when the step failed before it could screen anythi
 | `marker` | `<!-- prompt-guard -->` | The hidden HTML comment that identifies this action's comment or issue. Use a different one per workflow if several screen the same pull request. |
 | `malicious-label` | `MALICIOUS` | The model's label whose score is compared with the threshold. It must be one of the labels in TEI's `/info`. |
 | `github-token` | `${{ github.token }}` | The token for escalation. |
+| `bot-login` | `github-actions[bot]` | The login `github-token` posts as, used to find this action's comment and issue. Set it for a personal access token or an app's token. |
 
 Set `payload-fields`, `files`, or both. Every input reaches the script through the environment,
 never by interpolation into the script.
@@ -87,7 +88,7 @@ never by interpolation into the script.
 | `scores` | A JSON object mapping each screened name to its highest score, e.g. `{"title":0.0004,"body":0.9996}`. |
 | `flagged` | A JSON array of the flagged names. |
 | `would-escalate` | `true` when a text was flagged, so the action escalates unless it's a dry run. |
-| `escalated` | `true` when the escalation was made in full. |
+| `escalated` | `true` when the escalation comment or issue was posted. |
 
 ## Permissions
 
@@ -126,19 +127,29 @@ scored. It fails closed:
 Only when a text is flagged and it's not a dry run.
 
 - **Events with a pull request** (`pull_request`, `pull_request_target`, reviews, and comments on
-  a pull request): one comment, found by `marker` among `github-actions[bot]`'s comments and
-  updated by later runs, mentioning `notify`; the `label`, created if missing; and a conversion to
-  a draft (GraphQL `convertPullRequestToDraft`), so it isn't merged or picked up as ready while
-  someone looks.
-- **Other events**: one open issue by `github-actions[bot]` with the marker, labeled. Later runs
-  comment on it while it's open, mentioning `notify`.
+  a pull request), in this order:
+  1. the `label`, created if missing;
+  2. a conversion to a draft (GraphQL `convertPullRequestToDraft`), so it isn't merged or picked
+     up as ready while someone looks;
+  3. one comment, found by `marker` among the comments of `bot-login` and updated by later runs,
+     mentioning `notify`. It says whether the label was added and whether the pull request was
+     converted to a draft.
+- **Other events**: one open issue with the `label` and the marker, opened by `bot-login`. Later
+  runs find it by the label and comment on it while it's open, mentioning `notify`. Without a
+  label, it is found by its creator, `bot-login`.
+
+The label and the draft are best effort: if one fails, the action logs a warning and the comment
+says so. A `GITHUB_TOKEN` may not be allowed to convert a pull request to a draft. The comment or
+the issue is the escalation itself: if it can't be posted, `escalated` is `false` and the step
+fails, also in audit mode, because a flag nobody hears about is no use.
 
 The comment and the issue never quote the flagged text: they list the names, scores, threshold,
 commit and a link to the run, nothing else. Close the issue, or remove the label and mark the pull
 request ready, once someone has looked. The action never un-flags anything itself.
 
-If any of these steps fails, the others are still tried, `escalated` is `false`, and the step
-fails, also in audit mode: a flag nobody hears about is no use.
+With a `github-token` other than the workflow's, a personal access token or an app's token, set
+`bot-login` to the login it posts as, e.g. `my-app[bot]`, or the action won't find its own
+comment and issue again.
 
 ## How long texts are scored
 

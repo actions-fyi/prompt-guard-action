@@ -90,6 +90,12 @@ inputs:
     description: The token for escalation.
     required: false
     default: ${{ github.token }}
+  bot-login:
+    description: >-
+      The login that github-token posts as, used to find this action's own comment and issue.
+      Set it when github-token is a personal access token or an app's token, e.g. my-app[bot].
+    required: false
+    default: github-actions[bot]
 outputs:
   verdict:
     description: >-
@@ -106,7 +112,7 @@ outputs:
     description: true when a text was flagged, so the action escalates unless it's a dry run.
     value: ${{ steps.guard.outputs.would-escalate }}
   escalated:
-    description: true when the escalation was made in full.
+    description: true when the comment or the issue was posted.
     value: ${{ steps.guard.outputs.escalated }}
 runs:
   using: composite
@@ -130,6 +136,7 @@ runs:
         PROMPT_GUARD_LABEL: ${{ inputs.label }}
         PROMPT_GUARD_MARKER: ${{ inputs.marker }}
         PROMPT_GUARD_MALICIOUS_LABEL: ${{ inputs.malicious-label }}
+        PROMPT_GUARD_BOT_LOGIN: ${{ inputs.bot-login }}
       with:
         github-token: ${{ inputs.github-token }}
         script: return await require(process.env.ACTION_PATH + '/src/main.js')({ github, context, core })

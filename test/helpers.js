@@ -125,9 +125,14 @@ function mockCore() {
 
 const BOT = { login: 'github-actions[bot]', type: 'Bot' };
 
-// A fake Octokit that records every call. fail names the calls that answer 403.
-function mockGithub({ comments = [], issues = [], pull, labelExists = true, fail = [] } = {}) {
+// A fake Octokit that records every call. fail names the calls that answer 403. A list answer
+// (comments, issues) is either one page or, as an array of arrays, several; paginate requests
+// page after page until one comes back empty, as Octokit follows Link headers until the last.
+// dropLabels makes issues.create ignore its labels, as GitHub does for a token that may not set
+// them.
+function mockGithub({ comments = [], issues = [], pull, labelExists = true, fail = [], dropLabels = false } = {}) {
   const calls = [];
+  const pages = (list) => (list.length > 0 && Array.isArray(list[0]) ? list : [list]);
   const call = (name, answer) => async (params) => {
     calls.push({ name, params });
     if (fail.includes(name)) {
@@ -135,28 +140,40 @@ function mockGithub({ comments = [], issues = [], pull, labelExists = true, fail
     }
     return { data: typeof answer === 'function' ? answer(params) : answer };
   };
+  const paged = (list) => (params) => pages(list)[(params.page ?? 1) - 1] ?? [];
   const github = {
     calls,
     rest: {
       issues: {
-        listComments: call('issues.listComments', comments),
+        listComments: call('issues.listComments', paged(comments)),
         createComment: call('issues.createComment', { id: 100 }),
         updateComment: call('issues.updateComment', { id: 100 }),
         getLabel: async (params) => {
           calls.push({ name: 'issues.getLabel', params });
+          if (fail.includes('issues.getLabel')) throw Object.assign(new Error('Forbidden'), { status: 403 });
           if (!labelExists) throw Object.assign(new Error('Not Found'), { status: 404 });
           return { data: { name: params.name } };
         },
         createLabel: call('issues.createLabel', {}),
         addLabels: call('issues.addLabels', []),
-        listForRepo: call('issues.listForRepo', issues),
-        create: call('issues.create', { number: 55 }),
+        listForRepo: call('issues.listForRepo', paged(issues)),
+        create: call('issues.create', (params) => ({
+          number: 55,
+          labels: dropLabels ? [] : (params.labels ?? []).map((name) => ({ name })),
+        })),
       },
       pulls: {
         get: call('pulls.get', pull ?? { number: 7, state: 'open', draft: false, node_id: 'PR_node7' }),
       },
     },
-    paginate: async (method, params) => (await method(params)).data,
+    paginate: async (method, params) => {
+      const all = [];
+      for (let page = 1; ; page++) {
+        const { data } = await method({ ...params, page });
+        if (data.length === 0) return all;
+        all.push(...data);
+      }
+    },
     graphql: async (query, variables) => {
       calls.push({ name: 'graphql', query, variables });
       if (fail.includes('graphql')) throw Object.assign(new Error('Resource not accessible by integration'), { status: 403 });

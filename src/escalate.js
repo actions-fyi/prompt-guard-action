@@ -2,16 +2,19 @@
 
 const { formatScore } = require('./verdict');
 
-// Tells people about a flagged text. On a pull request: one comment, found by the marker and
-// updated by later runs, the label, and a conversion to draft, so it can't be merged or picked up
-// as ready while someone looks. On any other event: one open issue, found by the marker, which
-// later runs comment on.
+// Tells people about a flagged text. On a pull request: the label, a conversion to draft, so it
+// isn't merged or picked up as ready while someone looks, and one comment, found by the marker and
+// updated by later runs. On any other event: one open issue, found by its label and the marker,
+// which later runs comment on.
+//
+// The comment or the issue is the escalation: if it can't be posted, escalate throws and the step
+// fails. The label and the draft are best effort, since a GITHUB_TOKEN may not be allowed to
+// convert a pull request to a draft. They are tried first, so that the comment says what actually
+// happened.
 //
 // Nothing written here quotes or describes the flagged text. A comment that repeated it would put
 // the injection in front of every agent that reads the thread. Only the names of the texts, their
 // scores, the threshold, the run and the commit are written.
-
-const BOT = 'github-actions[bot]';
 
 class EscalationError extends Error {
   constructor(message) {
@@ -59,7 +62,9 @@ function buildBody({ context, inputs, scores, flagged, subject, actions }) {
   lines.push(
     '',
     'The score is a signal, not a judgement: it can flag harmless text and miss an injection. ' +
-      'Remove the label and mark the pull request ready once it has been reviewed.',
+      (subject === 'this pull request'
+        ? 'Remove the label and mark the pull request ready once it has been reviewed.'
+        : 'Close this issue once the texts have been reviewed.'),
   );
   return lines.join('\n');
 }
@@ -89,101 +94,134 @@ function describe(error) {
   return message ? `${status}: ${message}` : status;
 }
 
-async function escalatePullRequest({ github, context, inputs, scores, flagged, number }) {
+const DRAFT_MUTATION =
+  'mutation($id: ID!) { convertPullRequestToDraft(input: {pullRequestId: $id}) { pullRequest { isDraft } } }';
+
+async function escalatePullRequest({ github, context, core, inputs, scores, flagged, number }) {
   const repo = context.repo;
-  const failures = [];
-  const step = async (what, fn) => {
-    try {
-      await fn();
-      return true;
-    } catch (error) {
-      failures.push(`${what} (${describe(error)})`);
-      return false;
-    }
-  };
+  const notes = [];
 
+  // The event's copy may be stale, or absent for a comment on a pull request.
   let pull;
-  await step('read the pull request', async () => {
+  try {
     pull = (await github.rest.pulls.get({ ...repo, pull_number: number })).data;
-  });
-  const willDraft = Boolean(pull && pull.state === 'open' && !pull.draft);
-  const actions = [];
-  if (inputs.label) actions.push(`The pull request is labeled \`${inputs.label}\`.`);
-  if (willDraft) actions.push('It was converted to a draft.');
-  const body = buildBody({ context, inputs, scores, flagged, subject: 'this pull request', actions });
+  } catch (error) {
+    core.warning(`Prompt Guard could not read pull request #${number} (${describe(error)}), so it uses the event's copy.`);
+    pull = context.payload.pull_request?.number === number ? context.payload.pull_request : undefined;
+  }
 
-  await step('post the comment', async () => {
+  if (inputs.label) {
+    try {
+      await ensureLabel(github, repo, inputs.label);
+      await github.rest.issues.addLabels({ ...repo, issue_number: number, labels: [inputs.label] });
+      notes.push(`The pull request is labeled \`${inputs.label}\`.`);
+    } catch (error) {
+      core.warning(`Prompt Guard could not add the label (${describe(error)}).`);
+      notes.push(`The label \`${inputs.label}\` could not be added.`);
+    }
+  }
+
+  if (pull?.draft === true) {
+    notes.push('It is already a draft.');
+  } else if (pull && pull.state !== 'open') {
+    // A closed pull request can't be converted, and needn't be.
+  } else if (pull?.node_id) {
+    try {
+      await github.graphql(DRAFT_MUTATION, { id: pull.node_id });
+      notes.push('It was converted to a draft.');
+    } catch (error) {
+      core.warning(`Prompt Guard could not convert the pull request to a draft (${describe(error)}).`);
+      notes.push('It could not be converted to a draft.');
+    }
+  } else {
+    notes.push('It could not be converted to a draft.');
+  }
+
+  const body = buildBody({ context, inputs, scores, flagged, subject: 'this pull request', actions: notes });
+  try {
     const comments = await github.paginate(github.rest.issues.listComments, { ...repo, issue_number: number, per_page: 100 });
-    const existing = comments.filter((comment) => comment.user?.login === BOT && comment.body?.includes(inputs.marker)).pop();
+    const existing = comments
+      .filter((comment) => comment.user?.login === inputs.botLogin && comment.body?.includes(inputs.marker))
+      .pop();
     if (existing) {
       await github.rest.issues.updateComment({ ...repo, comment_id: existing.id, body });
     } else {
       await github.rest.issues.createComment({ ...repo, issue_number: number, body });
     }
-  });
-  if (inputs.label) {
-    await step('add the label', async () => {
-      await ensureLabel(github, repo, inputs.label);
-      await github.rest.issues.addLabels({ ...repo, issue_number: number, labels: [inputs.label] });
-    });
+  } catch (error) {
+    throw new EscalationError(`Prompt Guard could not post the comment on pull request #${number} (${describe(error)}).`);
   }
-  if (willDraft) {
-    await step('convert the pull request to a draft', async () => {
-      await github.graphql(
-        'mutation($id: ID!) { convertPullRequestToDraft(input: {pullRequestId: $id}) { pullRequest { isDraft } } }',
-        { id: pull.node_id },
-      );
-    });
-  }
-  return failures;
 }
 
-async function escalateIssue({ github, context, inputs, scores, flagged }) {
+async function escalateIssue({ github, context, core, inputs, scores, flagged }) {
   const repo = context.repo;
-  const failures = [];
   const subject = `untrusted text in a ${context.eventName} run`;
-  const actions = inputs.label ? [`This issue is labeled \`${inputs.label}\`.`] : [];
-  const body = buildBody({ context, inputs, scores, flagged, subject, actions });
+  const body = buildBody({ context, inputs, scores, flagged, subject, actions: [] });
+
+  if (inputs.label) {
+    try {
+      await ensureLabel(github, repo, inputs.label);
+    } catch (error) {
+      core.warning(`Prompt Guard could not create the label (${describe(error)}).`);
+    }
+  }
+
+  // Found by the label, which every issue it opens carries, rather than by its creator, which
+  // depends on the token. Without a label, by the creator.
+  let existing;
   try {
     const issues = await github.paginate(github.rest.issues.listForRepo, {
       ...repo,
       state: 'open',
-      creator: BOT,
+      ...(inputs.label ? { labels: inputs.label } : { creator: inputs.botLogin }),
       per_page: 100,
     });
-    const existing = issues.find(
-      (issue) => !issue.pull_request && issue.user?.login === BOT && issue.body?.includes(inputs.marker),
+    existing = issues.find(
+      (issue) => !issue.pull_request && issue.user?.login === inputs.botLogin && issue.body?.includes(inputs.marker),
     );
-    let number;
-    if (existing) {
-      number = existing.number;
-      await github.rest.issues.createComment({ ...repo, issue_number: number, body });
-    } else {
-      number = (await github.rest.issues.create({ ...repo, title: 'Prompt Guard flagged untrusted text', body })).data.number;
-    }
-    if (inputs.label) {
-      try {
-        await ensureLabel(github, repo, inputs.label);
-        await github.rest.issues.addLabels({ ...repo, issue_number: number, labels: [inputs.label] });
-      } catch (error) {
-        failures.push(`add the label (${describe(error)})`);
-      }
-    }
   } catch (error) {
-    failures.push(`open or comment on the issue (${describe(error)})`);
+    throw new EscalationError(`Prompt Guard could not look for its open issue (${describe(error)}).`);
   }
-  return failures;
+
+  if (existing) {
+    try {
+      await github.rest.issues.createComment({ ...repo, issue_number: existing.number, body });
+    } catch (error) {
+      throw new EscalationError(`Prompt Guard could not comment on issue #${existing.number} (${describe(error)}).`);
+    }
+    return;
+  }
+
+  let issue;
+  try {
+    issue = (
+      await github.rest.issues.create({
+        ...repo,
+        title: 'Prompt Guard flagged untrusted text',
+        body,
+        ...(inputs.label ? { labels: [inputs.label] } : {}),
+      })
+    ).data;
+  } catch (error) {
+    throw new EscalationError(`Prompt Guard could not open an issue (${describe(error)}).`);
+  }
+  // GitHub drops the labels of a new issue silently when the token may not set them. The next run
+  // finds the issue by its label, so it is added again if it is missing.
+  const labeled = (issue.labels ?? []).some((label) => (typeof label === 'string' ? label : label?.name) === inputs.label);
+  if (inputs.label && !labeled) {
+    try {
+      await github.rest.issues.addLabels({ ...repo, issue_number: issue.number, labels: [inputs.label] });
+    } catch (error) {
+      core.warning(`Prompt Guard could not label issue #${issue.number} (${describe(error)}), so the next run opens another.`);
+    }
+  }
 }
 
-// Throws an EscalationError naming every step that failed, after trying all of them.
-async function escalate({ github, context, inputs, scores, flagged }) {
+// Throws an EscalationError when the comment or the issue could not be posted.
+async function escalate({ github, context, core, inputs, scores, flagged }) {
   const number = pullRequestNumber(context.payload);
-  const failures = number
-    ? await escalatePullRequest({ github, context, inputs, scores, flagged, number })
-    : await escalateIssue({ github, context, inputs, scores, flagged });
-  if (failures.length > 0) {
-    throw new EscalationError(`Prompt Guard could not ${failures.join(', ')}.`);
-  }
+  if (number) await escalatePullRequest({ github, context, core, inputs, scores, flagged, number });
+  else await escalateIssue({ github, context, core, inputs, scores, flagged });
 }
 
 module.exports = { EscalationError, buildBody, escalate, pullRequestNumber };

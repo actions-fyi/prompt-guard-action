@@ -34,6 +34,7 @@ const ENV = {
   label: 'PROMPT_GUARD_LABEL',
   marker: 'PROMPT_GUARD_MARKER',
   maliciousLabel: 'PROMPT_GUARD_MALICIOUS_LABEL',
+  botLogin: 'PROMPT_GUARD_BOT_LOGIN',
 };
 
 // The env names that hold secrets, masked before anything else runs.
@@ -49,6 +50,8 @@ const FORBIDDEN_SEGMENTS = new Set(['__proto__', 'prototype', 'constructor']);
 const HANDLE = /^@?([A-Za-z0-9](?:[A-Za-z0-9-]{0,38})(?:\/[A-Za-z0-9][A-Za-z0-9_.-]{0,99})?)$/;
 // Labels are free text on GitHub, but a short single line keeps them out of markup trouble.
 const LABEL = /^[^\r\n`<>]{1,50}$/;
+// A user or app login, e.g. github-actions[bot] or my-app[bot].
+const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})(?:\[bot\])?$/;
 // The marker must stay an invisible HTML comment, on one line.
 const MARKER = /^<!--[^\r\n]*-->$/;
 
@@ -180,6 +183,9 @@ function parseInputs(env = process.env) {
   const maliciousLabel = read(env, ENV.maliciousLabel) || 'MALICIOUS';
   if (!LABEL.test(maliciousLabel)) throw new ConfigError('malicious-label must be a short single line.');
 
+  const botLogin = read(env, ENV.botLogin) || 'github-actions[bot]';
+  if (!LOGIN.test(botLogin)) throw new ConfigError('bot-login must be a GitHub login, e.g. github-actions[bot].');
+
   return {
     address: parseAddress(read(env, ENV.address)),
     apiKey: read(env, ENV.apiKey),
@@ -193,6 +199,7 @@ function parseInputs(env = process.env) {
     label,
     marker,
     maliciousLabel,
+    botLogin,
   };
 }
 

@@ -107,7 +107,7 @@ on:
         description: true when a text was flagged.
         value: ${{ jobs.guard.outputs.would-escalate }}
       escalated:
-        description: true when the escalation was made in full.
+        description: true when the comment or the issue was posted.
         value: ${{ jobs.guard.outputs.escalated }}
 
 permissions: {}

@@ -65,13 +65,14 @@ test('a malicious text is flagged and escalated on the pull request in audit mod
   assert.deepEqual(core.failed, []);
 
   const names = github.calls.map((c) => c.name);
+  // The label and the draft come first, so that the comment can say whether they worked.
   assert.deepEqual(names, [
     'pulls.get',
-    'issues.listComments',
-    'issues.createComment',
     'issues.getLabel',
     'issues.addLabels',
     'graphql',
+    'issues.listComments',
+    'issues.createComment',
   ]);
   const comment = github.calls.find((c) => c.name === 'issues.createComment').params;
   assert.equal(comment.issue_number, 7);
@@ -81,6 +82,7 @@ test('a malicious text is flagged and escalated on the pull request in audit mod
   assert.match(comment.body, /threshold of 0\.5/);
   assert.match(comment.body, /Commit `0123456`/);
   assert.match(comment.body, /https:\/\/github\.com\/octo-org\/octo-repo\/actions\/runs\/4242/);
+  assert.match(comment.body, /The pull request is labeled `prompt-guard:flagged`\. It was converted to a draft\./);
   assert.deepEqual(github.calls.find((c) => c.name === 'issues.addLabels').params.labels, ['prompt-guard:flagged']);
   assert.deepEqual(github.calls.find((c) => c.name === 'graphql').variables, { id: 'PR_node7' });
 });
@@ -152,35 +154,161 @@ test('a comment on a pull request counts as a pull request event', async () => {
   assert.equal(github.calls.find((c) => c.name === 'pulls.get').params.pull_number, 9);
 });
 
-test('other events open one issue, and comment on it when it is already open', async () => {
+test('other events open one labeled issue, and comment on it while it is open', async () => {
   const context = prContext({ eventName: 'workflow_dispatch', payload: {} });
-  const fresh = mockGithub({ issues: [{ number: 3, user: BOT, body: 'unrelated', pull_request: undefined }] });
+  const fresh = mockGithub({ issues: [{ number: 3, user: BOT, body: 'unrelated' }] });
   const first = await run({ texts: { input: INJECTION }, github: fresh, context, PROMPT_GUARD_NOTIFY: '@octo-org/moderators' });
   assert.equal(first.core.outputs.escalated, 'true');
+  assert.deepEqual(fresh.calls.find((c) => c.name === 'issues.listForRepo').params, {
+    owner: 'octo-org',
+    repo: 'octo-repo',
+    state: 'open',
+    labels: 'prompt-guard:flagged',
+    per_page: 100,
+    page: 1,
+  });
   const created = fresh.calls.find((c) => c.name === 'issues.create').params;
   assert.equal(created.title, 'Prompt Guard flagged untrusted text');
+  assert.deepEqual(created.labels, ['prompt-guard:flagged']);
   assert.match(created.body, /@octo-org\/moderators/);
   assert.match(created.body, /workflow_dispatch run/);
-  assert.equal(fresh.calls.find((c) => c.name === 'issues.addLabels').params.issue_number, 55);
+  assert.match(created.body, /Close this issue once the texts have been reviewed/);
+  // The label stuck, so it isn't added again.
+  assert.ok(!fresh.calls.some((c) => c.name === 'issues.addLabels'));
 
-  const open = mockGithub({ issues: [{ number: 12, user: BOT, body: '<!-- prompt-guard -->\n...' }] });
+  const open = mockGithub({
+    issues: [
+      [
+        { number: 10, user: { login: 'mallory' }, body: '<!-- prompt-guard -->' },
+        { number: 11, user: BOT, body: '<!-- prompt-guard -->', pull_request: {} },
+      ],
+      [{ number: 12, user: BOT, body: '<!-- prompt-guard -->\n...' }],
+    ],
+  });
   await run({ texts: { input: INJECTION }, github: open, context });
   assert.ok(!open.calls.some((c) => c.name === 'issues.create'));
   assert.equal(open.calls.find((c) => c.name === 'issues.createComment').params.issue_number, 12);
 });
 
-test('a failed escalation fails the step, even in audit mode, and keeps the verdict', async () => {
-  const github = mockGithub({ fail: ['issues.createComment', 'graphql'] });
+test('labels that GitHub drops from a new issue are added afterwards', async () => {
+  const context = prContext({ eventName: 'schedule', payload: {} });
+  const github = mockGithub({ dropLabels: true });
+  await run({ texts: { input: INJECTION }, github, context });
+  assert.deepEqual(github.calls.find((c) => c.name === 'issues.addLabels').params, {
+    owner: 'octo-org',
+    repo: 'octo-repo',
+    issue_number: 55,
+    labels: ['prompt-guard:flagged'],
+  });
+});
+
+test('without a label, the issue is found by bot-login as its creator', async () => {
+  const context = prContext({ eventName: 'schedule', payload: {} });
+  const github = mockGithub({ issues: [{ number: 4, user: { login: 'my-app[bot]' }, body: '<!-- prompt-guard -->' }] });
+  await run({ texts: { input: INJECTION }, github, context, PROMPT_GUARD_LABEL: '', PROMPT_GUARD_BOT_LOGIN: 'my-app[bot]' });
+  const list = github.calls.find((c) => c.name === 'issues.listForRepo').params;
+  assert.equal(list.creator, 'my-app[bot]');
+  assert.equal(list.labels, undefined);
+  assert.equal(github.calls.find((c) => c.name === 'issues.createComment').params.issue_number, 4);
+});
+
+test('the marker comment is found across pages', async () => {
+  const page = (from) => Array.from({ length: 3 }, (_, i) => ({ id: from + i, user: { login: 'someone' }, body: 'hi' }));
+  const github = mockGithub({
+    comments: [page(1), [...page(10), { id: 42, user: BOT, body: '<!-- prompt-guard -->\nold' }], page(20)],
+  });
+  const { core } = await run({ texts: { body: INJECTION }, github });
+  assert.equal(core.outputs.escalated, 'true');
+  assert.deepEqual(
+    github.calls.filter((c) => c.name === 'issues.listComments').map((c) => c.params.page),
+    [1, 2, 3, 4],
+  );
+  assert.equal(github.calls.find((c) => c.name === 'issues.updateComment').params.comment_id, 42);
+  assert.ok(!github.calls.some((c) => c.name === 'issues.createComment'));
+});
+
+test('a custom bot-login matches its own comment and ignores github-actions[bot]', async () => {
+  const github = mockGithub({
+    comments: [
+      { id: 1, user: BOT, body: '<!-- prompt-guard -->' },
+      { id: 2, user: { login: 'my-app[bot]' }, body: '<!-- prompt-guard -->' },
+    ],
+  });
+  await run({ texts: { body: INJECTION }, github, PROMPT_GUARD_BOT_LOGIN: 'my-app[bot]' });
+  assert.equal(github.calls.find((c) => c.name === 'issues.updateComment').params.comment_id, 2);
+});
+
+test('an invalid bot-login is a configuration error', async () => {
+  const { verdict, tei } = await run({ texts: { body: 'hi' }, PROMPT_GUARD_BOT_LOGIN: 'not a login' });
+  assert.equal(verdict, 'error');
+  assert.equal(tei.calls.length, 0);
+});
+
+test('a failed label and draft are warnings, and the comment says so', async () => {
+  const github = mockGithub({ fail: ['issues.addLabels', 'graphql'] });
   const { verdict, core } = await run({ texts: { body: INJECTION }, github });
   assert.equal(verdict, 'flagged');
-  assert.equal(core.outputs.escalated, 'false');
-  assert.equal(core.outputs['would-escalate'], 'true');
-  assert.equal(core.failed.length, 1);
-  assert.match(core.failed[0], /post the comment \(HTTP 403/);
-  assert.match(core.failed[0], /convert the pull request to a draft/);
-  // The label was still added: one failure doesn't stop the other steps.
-  assert.ok(github.calls.some((c) => c.name === 'issues.addLabels'));
+  assert.equal(core.outputs.escalated, 'true');
+  assert.deepEqual(core.failed, []);
+  assert.ok(core.logs.some((l) => /could not add the label \(HTTP 403/.test(l)));
+  assert.ok(core.logs.some((l) => /could not convert the pull request to a draft \(HTTP 403/.test(l)));
+  const body = github.calls.find((c) => c.name === 'issues.createComment').params.body;
+  assert.match(body, /The label `prompt-guard:flagged` could not be added\. It could not be converted to a draft\./);
+  assert.doesNotMatch(body, /is labeled|was converted/);
 });
+
+test('a pull request that is already a draft or closed is not converted', async () => {
+  const draft = mockGithub({ pull: { number: 7, state: 'open', draft: true, node_id: 'PR_node7' } });
+  await run({ texts: { body: INJECTION }, github: draft });
+  assert.ok(!draft.calls.some((c) => c.name === 'graphql'));
+  assert.match(draft.calls.find((c) => c.name === 'issues.createComment').params.body, /It is already a draft\./);
+
+  const closed = mockGithub({ pull: { number: 7, state: 'closed', draft: false, node_id: 'PR_node7' } });
+  await run({ texts: { body: INJECTION }, github: closed });
+  assert.ok(!closed.calls.some((c) => c.name === 'graphql'));
+  assert.doesNotMatch(closed.calls.find((c) => c.name === 'issues.createComment').params.body, /draft/);
+});
+
+test('when pulls.get fails, the event copy is used, and the comment is still posted', async () => {
+  const github = mockGithub({ fail: ['pulls.get'] });
+  const context = prContext();
+  context.payload.pull_request = { ...context.payload.pull_request, state: 'open', draft: false, node_id: 'PR_event7' };
+  const { core } = await run({ texts: { body: INJECTION }, github, context });
+  assert.equal(core.outputs.escalated, 'true');
+  assert.deepEqual(core.failed, []);
+  assert.ok(core.logs.some((l) => /could not read pull request #7 \(HTTP 403/.test(l)));
+  assert.deepEqual(github.calls.find((c) => c.name === 'graphql').variables, { id: 'PR_event7' });
+
+  // A comment on a pull request carries no pull request object, so there is nothing to convert.
+  const comment = mockGithub({ fail: ['pulls.get'] });
+  const onComment = prContext({ eventName: 'issue_comment', payload: { issue: { number: 9, pull_request: {} } } });
+  await run({ texts: { body: INJECTION }, github: comment, context: onComment });
+  assert.ok(!comment.calls.some((c) => c.name === 'graphql'));
+  assert.match(comment.calls.find((c) => c.name === 'issues.createComment').params.body, /It could not be converted to a draft\./);
+});
+
+for (const failing of ['issues.createComment', 'issues.listComments']) {
+  test(`a comment that can't be posted (${failing}) fails the step in audit mode, and keeps the verdict`, async () => {
+    const github = mockGithub({ fail: [failing] });
+    const { verdict, core } = await run({ texts: { body: INJECTION }, github });
+    assert.equal(verdict, 'flagged');
+    assert.equal(core.outputs.verdict, 'flagged');
+    assert.equal(core.outputs.escalated, 'false');
+    assert.equal(core.outputs['would-escalate'], 'true');
+    assert.equal(core.failed.length, 1);
+    assert.match(core.failed[0], /could not post the comment on pull request #7 \(HTTP 403/);
+  });
+}
+
+for (const failing of ['issues.listForRepo', 'issues.create', 'issues.createComment']) {
+  test(`an issue that can't be opened or commented on (${failing}) fails the step`, async () => {
+    const issues = failing === 'issues.createComment' ? [{ number: 12, user: BOT, body: '<!-- prompt-guard -->' }] : [];
+    const github = mockGithub({ fail: [failing], issues });
+    const { core } = await run({ texts: { input: INJECTION }, github, context: prContext({ eventName: 'schedule', payload: {} }) });
+    assert.equal(core.outputs.escalated, 'false');
+    assert.equal(core.failed.length, 1);
+  });
+}
 
 test('nothing written anywhere contains the text, in a pull request or an issue', async () => {
   const long = [...filler(1000), INJECTION, ...filler(200, 3)].join(' ');

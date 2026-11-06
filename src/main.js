@@ -69,7 +69,7 @@ module.exports = async function main({ github, context, core, env = process.env,
       core.notice('Dry run: Prompt Guard would escalate, but makes no changes on GitHub.');
     } else {
       try {
-        await escalate({ github, context, inputs, scores: outputs.scores, flagged });
+        await escalate({ github, context, core, inputs, scores: outputs.scores, flagged });
         outputs.escalated = true;
       } catch (error) {
         escalationError = error;
