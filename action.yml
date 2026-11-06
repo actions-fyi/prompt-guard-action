@@ -1,0 +1,120 @@
+name: Prompt Guard
+description: >-
+  Screens untrusted text, such as a pull request's title and body, for prompt injection with Llama
+  Prompt Guard 2 served by text-embeddings-inference, before an agent reads it.
+author: actions-fyi
+branding:
+  icon: shield
+  color: red
+# A composite action with a single github-script step that loads plain CommonJS modules from
+# src/: no npm dependencies, no build and no dist/. github-script's require resolves an absolute
+# path as is (wrap-require.ts), and github.action_path, which only composite actions have, is
+# this action's own directory, wherever it was fetched to.
+#
+# Every input reaches the script through the step's env, never by interpolation into the script,
+# so a text can't turn into code. The API key and the Access values are masked before any
+# request is made.
+#
+# The verdict is clean only when every text was scored below the threshold. Anything else that
+# keeps a text from being scored gives the verdict error and fails the step, in every mode.
+#
+# Permissions the job needs for escalation (none for a dry run):
+#   contents: read, pull-requests: write, issues: write
+inputs:
+  address:
+    description: The base URL of the TEI service, e.g. https://prompt-guard.example.com.
+    required: true
+  api-key:
+    description: TEI's API key, sent as Authorization Bearer. Empty sends no Authorization header.
+    required: false
+    default: ""
+  access-client-id:
+    description: >-
+      The Cloudflare Access service token's client ID, sent as CF-Access-Client-Id. Set it and
+      access-client-secret together, or neither when TEI has no Access gate in front of it.
+    required: false
+    default: ""
+  access-client-secret:
+    description: The Cloudflare Access service token's client secret, sent as CF-Access-Client-Secret.
+    required: false
+    default: ""
+  texts:
+    description: >-
+      A JSON object mapping a name to a text, e.g. {"title": "...", "body": "..."}. Names are
+      letters, digits, ".", "_" and "-". Empty and null texts are skipped.
+    required: true
+  threshold:
+    description: The score, between 0 and 1, at or above which a text is flagged.
+    required: false
+    default: "0.5"
+  mode:
+    description: >-
+      audit: a flagged text sets the outputs and escalates, but doesn't fail the step. block: it
+      also fails the step.
+    required: false
+    default: audit
+  dry-run:
+    description: Scan and set every output, but make no changes on GitHub.
+    required: false
+    default: "false"
+  notify:
+    description: Handles to mention when escalating, e.g. "@org/moderators @octocat".
+    required: false
+    default: ""
+  label:
+    description: The label for a flagged pull request or escalation issue. Empty adds none.
+    required: false
+    default: prompt-guard:flagged
+  marker:
+    description: The hidden HTML comment that identifies this action's comment or issue.
+    required: false
+    default: <!-- prompt-guard -->
+  malicious-label:
+    description: The model's label whose score is checked against the threshold.
+    required: false
+    default: MALICIOUS
+  github-token:
+    description: The token for escalation.
+    required: false
+    default: ${{ github.token }}
+outputs:
+  verdict:
+    description: >-
+      clean, flagged or error. Empty means the step failed before it could screen anything; treat
+      that as error.
+    value: ${{ steps.guard.outputs.verdict }}
+  scores:
+    description: A JSON object mapping each screened name to its highest score.
+    value: ${{ steps.guard.outputs.scores }}
+  flagged:
+    description: A JSON array of the flagged names.
+    value: ${{ steps.guard.outputs.flagged }}
+  would-escalate:
+    description: true when a text was flagged, so the action escalates unless it's a dry run.
+    value: ${{ steps.guard.outputs.would-escalate }}
+  escalated:
+    description: true when the escalation was made in full.
+    value: ${{ steps.guard.outputs.escalated }}
+runs:
+  using: composite
+  steps:
+    - name: Screen Text
+      id: guard
+      uses: actions/github-script@v9.0.0
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        PROMPT_GUARD_ADDRESS: ${{ inputs.address }}
+        PROMPT_GUARD_API_KEY: ${{ inputs.api-key }}
+        PROMPT_GUARD_ACCESS_CLIENT_ID: ${{ inputs.access-client-id }}
+        PROMPT_GUARD_ACCESS_CLIENT_SECRET: ${{ inputs.access-client-secret }}
+        PROMPT_GUARD_TEXTS: ${{ inputs.texts }}
+        PROMPT_GUARD_THRESHOLD: ${{ inputs.threshold }}
+        PROMPT_GUARD_MODE: ${{ inputs.mode }}
+        PROMPT_GUARD_DRY_RUN: ${{ inputs.dry-run }}
+        PROMPT_GUARD_NOTIFY: ${{ inputs.notify }}
+        PROMPT_GUARD_LABEL: ${{ inputs.label }}
+        PROMPT_GUARD_MARKER: ${{ inputs.marker }}
+        PROMPT_GUARD_MALICIOUS_LABEL: ${{ inputs.malicious-label }}
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: return await require(process.env.ACTION_PATH + '/src/main.js')({ github, context, core })

@@ -1,0 +1,53 @@
+name: CI
+# The unit tests and actionlint, on pull requests and in the merge queue. Neither needs a secret
+# or the live service: the tests mock fetch and Octokit. The live test is test.yml, which can only
+# run from main or the merge queue.
+on:
+  pull_request:
+  merge_group:
+
+permissions: {}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # Check out the repository
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@v2.22.3
+        with:
+          egress-policy: audit
+      - name: Checkout Repository
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      # The Node version that actions/github-script v9 runs the action with.
+      - name: Set up Node
+        uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 24
+      - name: Run Unit Tests
+        run: node --test test/*.test.js
+
+  lint:
+    name: Lint GitHub Actions
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # Check out the repository
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@v2.22.3
+        with:
+          egress-policy: audit
+      - name: Checkout Repository
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Lint GitHub Actions Workflows
+        uses: kjanat/actionlint@v1.17.0

@@ -1,0 +1,8 @@
+# `uses: $/` in _shared.yml is GitHub's self repository reference to this repository's root
+# action, at the commit the workflow runs at; gh actions-lock classifies a bare `$/` as the
+# repository root action too. actionlint (kjanat/actionlint 1.17.0) only accepts `$/` followed by
+# a path, so that one finding is ignored there, and nowhere else.
+paths:
+  .github/workflows/_shared.yml:
+    ignore:
+      - 'specifying action "\$/" in invalid format because path is missing'

@@ -1,0 +1,205 @@
+name: Prompt Guard
+# A reusable workflow around this repository's action, for the deployment that reads its secrets
+# from OpenBao. Other repositories call it with
+# `uses: actions-fyi/prompt-guard-action/.github/workflows/_shared.yml@<ref>`, this repository with
+# `uses: $/.github/workflows/_shared.yml`. Anyone with another setup can use the action directly.
+#
+# The _ prefix marks a shared workflow: called only with workflow_call, never by events or rulesets.
+#
+# OpenBao trusts this file, not its callers. Its JWT role is bound to the job_workflow_ref claim of
+# the OIDC token, which names this file at the ref it runs from: refs/heads/main,
+# refs/heads/gh-readonly-queue/main/* (the merge queue) or refs/tags/v*. So any repository can
+# call it, but only from those refs of this repository does it get the secrets, and the file must
+# keep this name and path. A pull request's copy runs from refs/pull/<n>/merge and gets nothing.
+#
+# The action runs with `uses: $/`, which resolves to this repository at the commit this workflow
+# runs at, wherever it was called from. `./` would resolve to the caller's checkout instead.
+#
+# The Cloudflare Access service token in front of TEI is split across two stores: its client ID
+# is the GitHub secret PROMPT_GUARD_CLIENT_ID, and its client secret lives in OpenBao. Neither
+# half alone passes Access. Without PROMPT_GUARD_CLIENT_ID, no Access secret is read and no Access
+# headers are sent, for a TEI reachable without Access, e.g. from internal runners. A separate
+# Access application may guard OpenBao itself; CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET
+# are its service token, sent to OpenBao only when both are set.
+#
+# The input defaults read the caller's configuration variables (workflow_call input defaults may
+# use the github, inputs and vars contexts): PROMPT_GUARD_ADDRESS for TEI and SECRETS_ADDRESS for
+# OpenBao, which is also the JWT audience unless jwt-audience is set.
+#
+# Secrets go from OpenBao straight into the action's inputs: never into a job output, the
+# environment or a file. vault-action masks each value it reads.
+on:
+  workflow_call:
+    inputs:
+      texts:
+        description: >-
+          A JSON object mapping a name to a text, e.g. {"title": "...", "body": "..."}. Empty and
+          null texts are skipped.
+        type: string
+        required: true
+      threshold:
+        description: The score, between 0 and 1, at or above which a text is flagged.
+        type: string
+        default: "0.5"
+      mode:
+        description: "audit: flag and escalate without failing. block: also fail the job."
+        type: string
+        default: audit
+      dry-run:
+        description: Scan and set every output, but make no changes on GitHub.
+        type: boolean
+        default: false
+      notify:
+        description: Handles to mention when escalating, e.g. "@org/moderators".
+        type: string
+        default: ""
+      label:
+        description: The label for a flagged pull request or escalation issue. Empty adds none.
+        type: string
+        default: prompt-guard:flagged
+      marker:
+        description: The hidden HTML comment that identifies the escalation comment or issue.
+        type: string
+        default: <!-- prompt-guard -->
+      address:
+        description: The base URL of the TEI service.
+        type: string
+        default: ${{ vars.PROMPT_GUARD_ADDRESS }}
+      secrets-address:
+        description: The URL of OpenBao.
+        type: string
+        default: ${{ vars.SECRETS_ADDRESS }}
+      jwt-audience:
+        description: The audience of the OIDC token for OpenBao. Empty uses secrets-address.
+        type: string
+        default: ""
+      openbao-method:
+        description: The OpenBao auth method.
+        type: string
+        default: jwt
+      openbao-path:
+        description: The mount path of the OpenBao auth method.
+        type: string
+        default: github-actions
+      openbao-role:
+        description: The OpenBao role, bound to this file's job_workflow_ref.
+        type: string
+        default: prompt-guard
+      api-key-secret:
+        description: The OpenBao path and key of TEI's API key, as vault-action takes it.
+        type: string
+        default: ci/data/prompt-guard-api api_key
+      access-secret:
+        description: >-
+          The OpenBao path and key of the Access client secret for TEI. Read only when
+          PROMPT_GUARD_CLIENT_ID is set.
+        type: string
+        default: ci/data/prompt-guard-access client_secret
+    secrets:
+      PROMPT_GUARD_CLIENT_ID:
+        description: The client ID of the Cloudflare Access service token in front of TEI.
+        required: false
+      CF_ACCESS_CLIENT_ID:
+        description: The client ID of the Cloudflare Access service token in front of OpenBao.
+        required: false
+      CF_ACCESS_CLIENT_SECRET:
+        description: The client secret of the Cloudflare Access service token in front of OpenBao.
+        required: false
+    outputs:
+      verdict:
+        description: clean, flagged or error; empty if the job failed before screening.
+        value: ${{ jobs.guard.outputs.verdict }}
+      scores:
+        description: A JSON object mapping each screened name to its highest score.
+        value: ${{ jobs.guard.outputs.scores }}
+      flagged:
+        description: A JSON array of the flagged names.
+        value: ${{ jobs.guard.outputs.flagged }}
+      would-escalate:
+        description: true when a text was flagged.
+        value: ${{ jobs.guard.outputs.would-escalate }}
+      escalated:
+        description: true when the escalation was made in full.
+        value: ${{ jobs.guard.outputs.escalated }}
+
+permissions: {}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  guard:
+    name: Prompt Guard
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # Request the OIDC token that OpenBao's JWT role checks
+      contents: read # Read the repository, the minimum the action documents
+      pull-requests: write # Label a flagged pull request and convert it to a draft
+      issues: write # Comment on the pull request, or open and comment on the escalation issue
+    outputs:
+      verdict: ${{ steps.guard.outputs.verdict }}
+      scores: ${{ steps.guard.outputs.scores }}
+      flagged: ${{ steps.guard.outputs.flagged }}
+      would-escalate: ${{ steps.guard.outputs.would-escalate }}
+      escalated: ${{ steps.guard.outputs.escalated }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@v2.22.3
+        with:
+          egress-policy: audit
+      # Only whether each value is set reaches the script, never a value.
+      - name: Check Configuration
+        env:
+          HAS_ADDRESS: ${{ inputs.address != '' }}
+          HAS_SECRETS_ADDRESS: ${{ inputs.secrets-address != '' }}
+          HAS_OPENBAO_ACCESS_ID: ${{ secrets.CF_ACCESS_CLIENT_ID != '' }}
+          HAS_OPENBAO_ACCESS_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET != '' }}
+        run: |
+          failed=0
+          if [[ "$HAS_ADDRESS" != true ]]; then
+            echo "::error::No TEI address: set the variable PROMPT_GUARD_ADDRESS or the input address."
+            failed=1
+          fi
+          if [[ "$HAS_SECRETS_ADDRESS" != true ]]; then
+            echo "::error::No OpenBao address: set the variable SECRETS_ADDRESS or the input secrets-address."
+            failed=1
+          fi
+          if [[ "$HAS_OPENBAO_ACCESS_ID" != "$HAS_OPENBAO_ACCESS_SECRET" ]]; then
+            echo "::error::Only one of CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET is set. Set both to pass Cloudflare Access in front of OpenBao, or neither."
+            failed=1
+          fi
+          exit "$failed"
+      # exportEnv is off, so the values only exist as this step's outputs, which only the next
+      # step reads. Empty header lines are dropped by vault-action.
+      - name: Read Secrets
+        id: secrets
+        uses: hashicorp/vault-action@v4.0.0
+        with:
+          url: ${{ inputs.secrets-address }}
+          method: ${{ inputs.openbao-method }}
+          path: ${{ inputs.openbao-path }}
+          role: ${{ inputs.openbao-role }}
+          jwtGithubAudience: ${{ inputs.jwt-audience || inputs.secrets-address }}
+          exportEnv: false
+          extraHeaders: |
+            ${{ secrets.CF_ACCESS_CLIENT_ID && secrets.CF_ACCESS_CLIENT_SECRET && format('CF-Access-Client-Id: {0}', secrets.CF_ACCESS_CLIENT_ID) || '' }}
+            ${{ secrets.CF_ACCESS_CLIENT_ID && secrets.CF_ACCESS_CLIENT_SECRET && format('CF-Access-Client-Secret: {0}', secrets.CF_ACCESS_CLIENT_SECRET) || '' }}
+          secrets: |
+            ${{ inputs.api-key-secret }} | api_key ;
+            ${{ secrets.PROMPT_GUARD_CLIENT_ID && format('{0} | access_secret ;', inputs.access-secret) || '' }}
+      - name: Screen Text
+        id: guard
+        uses: $/
+        with:
+          address: ${{ inputs.address }}
+          api-key: ${{ steps.secrets.outputs.api_key }}
+          access-client-id: ${{ secrets.PROMPT_GUARD_CLIENT_ID }}
+          access-client-secret: ${{ secrets.PROMPT_GUARD_CLIENT_ID && steps.secrets.outputs.access_secret || '' }}
+          texts: ${{ inputs.texts }}
+          threshold: ${{ inputs.threshold }}
+          mode: ${{ inputs.mode }}
+          dry-run: ${{ inputs.dry-run }}
+          notify: ${{ inputs.notify }}
+          label: ${{ inputs.label }}
+          marker: ${{ inputs.marker }}
