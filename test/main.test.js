@@ -47,10 +47,71 @@ test('empty and null texts are skipped', async () => {
   assert.equal(tei.calls.filter((c) => c.path === '/predict').length, 1);
 });
 
-test('no texts at all is clean without calling TEI', async () => {
-  const { verdict, tei } = await run({ texts: { body: '' } });
+test('nothing to screen is the verdict error by default, naming the fields', async () => {
+  const { verdict, core, tei } = await run({
+    texts: { body: '', title: null },
+    PROMPT_GUARD_PAYLOAD_FIELDS: 'body, title, issue.body',
+  });
+  assert.equal(verdict, 'error');
+  assert.equal(tei.calls.length, 0);
+  assert.match(core.failed[0], /Nothing was screened \(empty: body, title; missing from the event payload: issue\.body\)\. Set require-text to false/);
+});
+
+test('with require-text false, nothing to screen is a warning and clean', async () => {
+  const { verdict, core, tei } = await run({ texts: { body: '' }, PROMPT_GUARD_REQUIRE_TEXT: 'false' });
   assert.equal(verdict, 'clean');
   assert.equal(tei.calls.length, 0);
+  assert.deepEqual(core.failed, []);
+  assert.ok(core.logs.includes('Nothing was screened (empty: body).'));
+});
+
+test('a plain http address is refused unless allowed, and then warned about', async () => {
+  const refused = await run({ texts: { body: 'hi' }, PROMPT_GUARD_ADDRESS: 'http://tei.internal:8080' });
+  assert.equal(refused.verdict, 'error');
+  assert.equal(refused.tei.calls.length, 0);
+  assert.match(refused.core.failed[0], /must be an https:\/\/ URL\. Set allow-insecure-address/);
+
+  const allowed = await run({ texts: { body: 'hi' }, PROMPT_GUARD_ADDRESS: 'http://tei.internal:8080', PROMPT_GUARD_ALLOW_INSECURE_ADDRESS: 'true' });
+  assert.equal(allowed.verdict, 'clean');
+  assert.equal(allowed.tei.calls[0].url, 'http://tei.internal:8080/info');
+  assert.ok(allowed.core.logs.some((l) => /plain http/.test(l)));
+
+  const invalid = await run({ texts: { body: 'hi' }, PROMPT_GUARD_ALLOW_INSECURE_ADDRESS: 'maybe' });
+  assert.equal(invalid.verdict, 'error');
+});
+
+test('a fetch that times out is retried, then gives the verdict error', async () => {
+  let attempts = 0;
+  const tei = mockTei({
+    override: () => {
+      attempts++;
+      return Promise.reject(new DOMException('The operation was aborted due to timeout', 'TimeoutError'));
+    },
+  });
+  const { verdict, core } = await run({ texts: { body: 'hi' }, tei });
+  assert.equal(verdict, 'error');
+  assert.equal(attempts, 3);
+  assert.match(core.failed[0], /\/info could not be reached \(TimeoutError\)/);
+});
+
+test('/tokenize offsets that are not UTF-8 byte offsets give the verdict error', async () => {
+  // Character offsets, as a TEI that counted differently would send them.
+  const charOffsets = (text) => [
+    { id: 1, text: '[CLS]', special: true, start: null, stop: null },
+    ...[...text.matchAll(/\S+/g)].map((m) => ({ id: 5, text: m[0], special: false, start: m.index, stop: m.index + m[0].length })),
+    { id: 2, text: '[SEP]', special: true, start: null, stop: null },
+  ];
+  const tei = mockTei({
+    override: (path, init) => {
+      if (path !== '/tokenize') return undefined;
+      const { inputs } = JSON.parse(init.body);
+      return json(inputs.map(charOffsets));
+    },
+  });
+  const { verdict, core } = await run({ texts: { body: `héllo wörld ${INJECTION}` }, tei });
+  assert.equal(verdict, 'error');
+  assert.match(core.failed[0], /offsets that do not match the token text/);
+  assert.equal(tei.calls.filter((c) => c.path === '/predict').length, 0);
 });
 
 test('a malicious text is flagged and escalated on the pull request in audit mode, without failing', async () => {

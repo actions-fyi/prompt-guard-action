@@ -35,6 +35,8 @@ const ENV = {
   marker: 'PROMPT_GUARD_MARKER',
   maliciousLabel: 'PROMPT_GUARD_MALICIOUS_LABEL',
   botLogin: 'PROMPT_GUARD_BOT_LOGIN',
+  requireText: 'PROMPT_GUARD_REQUIRE_TEXT',
+  allowInsecureAddress: 'PROMPT_GUARD_ALLOW_INSECURE_ADDRESS',
 };
 
 // The env names that hold secrets, masked before anything else runs.
@@ -65,16 +67,21 @@ function parseBoolean(value, name) {
   throw new ConfigError(`${name} must be true or false.`);
 }
 
-function parseAddress(value) {
+// The API key and the Access values go to this address, so it must be https unless the caller
+// accepts sending them in the clear, e.g. to a TEI on the runner's own network.
+function parseAddress(value, allowInsecure) {
   if (!value) throw new ConfigError('address is required: the base URL of the TEI service.');
   let url;
   try {
     url = new URL(value);
   } catch {
-    throw new ConfigError('address must be an absolute http:// or https:// URL.');
+    throw new ConfigError('address must be an absolute https:// URL.');
+  }
+  if (url.protocol === 'http:' && !allowInsecure) {
+    throw new ConfigError('address must be an https:// URL. Set allow-insecure-address to true to send the credentials over plain http.');
   }
   if (url.protocol !== 'https:' && url.protocol !== 'http:') {
-    throw new ConfigError('address must be an absolute http:// or https:// URL.');
+    throw new ConfigError('address must be an absolute https:// URL.');
   }
   if (url.username || url.password) {
     throw new ConfigError('address must not contain credentials; use api-key instead.');
@@ -186,8 +193,12 @@ function parseInputs(env = process.env) {
   const botLogin = read(env, ENV.botLogin) || 'github-actions[bot]';
   if (!LOGIN.test(botLogin)) throw new ConfigError('bot-login must be a GitHub login, e.g. github-actions[bot].');
 
+  const allowInsecureAddress = parseBoolean(read(env, ENV.allowInsecureAddress) || 'false', 'allow-insecure-address');
+
   return {
-    address: parseAddress(read(env, ENV.address)),
+    address: parseAddress(read(env, ENV.address), allowInsecureAddress),
+    allowInsecureAddress,
+    requireText: parseBoolean(read(env, ENV.requireText) || 'true', 'require-text'),
     apiKey: read(env, ENV.apiKey),
     accessClientId,
     accessClientSecret,

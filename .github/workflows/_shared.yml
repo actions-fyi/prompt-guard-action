@@ -59,6 +59,12 @@ on:
           "comment=previous-comment.md".
         type: string
         default: ""
+      require-text:
+        description: >-
+          Whether finding nothing to screen is an error. false makes it a warning and the verdict
+          clean.
+        type: boolean
+        default: true
       threshold:
         description: The score, between 0 and 1, at or above which a text is flagged.
         type: string
@@ -223,6 +229,7 @@ jobs:
           payload-fields: ${{ inputs.payload-fields }}
           files: ${{ inputs.files }}
           files-directory: ${{ steps.artifact.outputs.path }}
+          require-text: ${{ inputs.require-text }}
           threshold: ${{ inputs.threshold }}
           mode: ${{ inputs.mode }}
           dry-run: ${{ inputs.dry-run }}

@@ -60,7 +60,7 @@ couldn't be scored, and empty when the step failed before it could screen anythi
 
 | Input | Default | Description |
 | --- | --- | --- |
-| `address` | required | The base URL of the TEI service. A path prefix is kept, e.g. `https://gateway.example.com/tei`. |
+| `address` | required | The base URL of the TEI service. A path prefix is kept, e.g. `https://gateway.example.com/tei`. It must be `https` unless `allow-insecure-address` is `true`. |
 | `api-key` | `""` | TEI's API key (`--api-key`), sent as `Authorization: Bearer`. |
 | `access-client-id` | `""` | The client ID of a Cloudflare Access service token, sent as `CF-Access-Client-Id`. |
 | `access-client-secret` | `""` | Its client secret, sent as `CF-Access-Client-Secret`. Set both Access values or neither; one alone is a configuration error, and nothing is sent. |
@@ -70,6 +70,8 @@ couldn't be scored, and empty when the step failed before it could screen anythi
 | `threshold` | `0.5` | A text whose score is at or above this is flagged. |
 | `mode` | `audit` | `audit` or `block`; see [below](#audit-block-and-dry-run). |
 | `dry-run` | `false` | Scan and set every output, but make no changes on GitHub. |
+| `require-text` | `true` | Whether finding nothing to screen, every field and file empty or missing, is the verdict `error`. With `false` it's a warning, and the verdict `clean`. |
+| `allow-insecure-address` | `false` | Allow a plain `http` address, e.g. a TEI on the runner's own network. The API key and the Access values are then sent unencrypted, and the action warns about it. |
 | `notify` | `""` | Handles to mention when escalating, e.g. `@my-org/moderators @octocat`. |
 | `label` | `prompt-guard:flagged` | The label for a flagged pull request or the escalation issue. Empty adds none. |
 | `marker` | `<!-- prompt-guard -->` | The hidden HTML comment that identifies this action's comment or issue. Use a different one per workflow if several screen the same pull request. |
@@ -115,6 +117,8 @@ Independent of the mode, the step fails with the verdict `error` whenever a text
 scored. It fails closed:
 
 - an invalid input, or only one of the two Access values;
+- nothing to screen at all, unless `require-text` is `false`;
+- a plain `http` address, unless `allow-insecure-address` is `true`;
 - TEI unreachable, or answering with any non-2xx status (429, 502, 503 and 504 are retried twice);
 - a 401 or 403: the API key or the Access token was refused;
 - a redirect, or an HTML page instead of JSON, which is how Cloudflare Access turns away a request

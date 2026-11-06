@@ -135,3 +135,21 @@ test('texts over TEI character limit are segmented before /tokenize', async () =
   assert.ok(first.body.inputs.length > 1);
   assert.ok(first.body.inputs.every((s) => Array.from(s).length <= 64 * 200));
 });
+
+test('a request that times out is aborted, retried twice, then a TeiError', async () => {
+  let attempts = 0;
+  const fetch = (url, init) =>
+    new Promise((resolve, reject) => {
+      attempts++;
+      init.signal.addEventListener('abort', () => reject(init.signal.reason));
+    });
+  const slow = createClient({ address: 'https://tei.example.test/', fetch, sleep: noSleep, timeoutMs: 20 });
+  // AbortSignal.timeout doesn't keep the event loop alive on its own.
+  const keepAlive = setInterval(() => {}, 5);
+  try {
+    await assert.rejects(slow.info(), (error) => error instanceof TeiError && /could not be reached \(TimeoutError\)/.test(error.message));
+  } finally {
+    clearInterval(keepAlive);
+  }
+  assert.equal(attempts, 3);
+});

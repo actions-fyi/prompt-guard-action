@@ -40,9 +40,21 @@ module.exports = async function main({ github, context, core, env = process.env,
   let inputs;
   try {
     inputs = parseInputs(env);
+    if (inputs.address.startsWith('http:')) {
+      core.warning('address is plain http, so the API key and the Access values are sent unencrypted.');
+    }
     const { texts, empty, missing } = collectTexts(inputs, context.payload);
     for (const name of empty) core.info(`${name}: empty, skipped.`);
     for (const name of missing) core.warning(`${name}: not in the event payload, skipped.`);
+    if (texts.length === 0) {
+      const reasons = [
+        empty.length > 0 ? `empty: ${empty.join(', ')}` : '',
+        missing.length > 0 ? `missing from the event payload: ${missing.join(', ')}` : '',
+      ].filter(Boolean);
+      const message = `Nothing was screened (${reasons.join('; ')}).`;
+      if (inputs.requireText) throw new ConfigError(`${message} Set require-text to false if that is expected.`);
+      core.warning(message);
+    }
 
     if (texts.length > 0) {
       const client = createClient({ ...inputs, fetch, sleep });

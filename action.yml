@@ -23,7 +23,9 @@ branding:
 #   contents: read, pull-requests: write, issues: write
 inputs:
   address:
-    description: The base URL of the TEI service, e.g. https://prompt-guard.example.com.
+    description: >-
+      The base URL of the TEI service, e.g. https://prompt-guard.example.com. It must be https
+      unless allow-insecure-address is true.
     required: true
   api-key:
     description: TEI's API key, sent as Authorization Bearer. Empty sends no Authorization header.
@@ -90,6 +92,16 @@ inputs:
     description: The token for escalation.
     required: false
     default: ${{ github.token }}
+  require-text:
+    description: >-
+      Whether finding nothing to screen, every field and file empty or missing, is the verdict
+      error. false makes it a warning and the verdict clean.
+    required: false
+    default: "true"
+  allow-insecure-address:
+    description: Whether address may be plain http, which sends the credentials unencrypted.
+    required: false
+    default: "false"
   bot-login:
     description: >-
       The login that github-token posts as, used to find this action's own comment and issue.
@@ -137,6 +149,8 @@ runs:
         PROMPT_GUARD_MARKER: ${{ inputs.marker }}
         PROMPT_GUARD_MALICIOUS_LABEL: ${{ inputs.malicious-label }}
         PROMPT_GUARD_BOT_LOGIN: ${{ inputs.bot-login }}
+        PROMPT_GUARD_REQUIRE_TEXT: ${{ inputs.require-text }}
+        PROMPT_GUARD_ALLOW_INSECURE_ADDRESS: ${{ inputs.allow-insecure-address }}
       with:
         github-token: ${{ inputs.github-token }}
         script: return await require(process.env.ACTION_PATH + '/src/main.js')({ github, context, core })
