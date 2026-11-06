@@ -231,6 +231,8 @@ github-script provides, no npm dependencies, no build and no `dist/`.
 node --test test/*.test.js
 ```
 
-The tests mock `fetch` with a fake TEI that enforces TEI's limits, and mock Octokit. The live
-test, [`test.yml`](.github/workflows/test.yml), runs the reusable workflow against the real
-service in a dry run, on pushes to `main`, in the merge queue and on demand.
+The tests mock `fetch` with a fake TEI that enforces TEI's limits, and mock Octokit. They run as
+Test / Unit ([`test.yml`](.github/workflows/test.yml)) on pull requests and in the merge queue.
+Test / Integration ([`integration.yml`](.github/workflows/integration.yml)) runs the reusable
+workflow against the real service in a dry run, on pushes to `main`, in the merge queue and on
+demand.
