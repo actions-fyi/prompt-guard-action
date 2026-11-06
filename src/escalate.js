@@ -3,9 +3,13 @@
 const { formatScore } = require('./verdict');
 
 // Tells people about a flagged text. On a pull request: the label, a conversion to draft, so it
-// isn't merged or picked up as ready while someone looks, and one comment, found by the marker and
-// updated by later runs. On any other event: one open issue, found by its label and the marker,
-// which later runs comment on.
+// isn't merged or picked up as ready while someone looks, and a comment. Each flag posts a new
+// comment, since GitHub sends no notifications for the mentions in an edited one, and the previous
+// one is minimized as outdated. On any other event: one open issue, found by its label and the
+// marker, which later runs comment on, again with the mentions.
+//
+// The action's comments and issues start with the marker, and are only recognised by it there,
+// from bot-login: a quote of the marker further down someone else's text never matches.
 //
 // The comment or the issue is the escalation: if it can't be posted, escalate throws and the step
 // fails. The label and the draft are best effort, since a GITHUB_TOKEN may not be allowed to
@@ -35,14 +39,33 @@ function runUrl(context) {
   return `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
 }
 
-function shortSha(context) {
-  const sha = context.payload.pull_request?.head?.sha || context.sha || '';
-  return sha.slice(0, 7);
+// The commit, only where the event names one: a pull request's head, preferring the fresh copy
+// from pulls.get, or a push. Elsewhere context.sha is just the default branch, which says nothing
+// about where the text came from.
+function commitSha(context, pull) {
+  const sha = pull?.head?.sha || context.payload.pull_request?.head?.sha || (context.eventName === 'push' ? context.payload.after || context.sha : '');
+  return typeof sha === 'string' && /^[0-9a-f]{7,64}$/.test(sha) ? sha.slice(0, 7) : '';
 }
 
-// The body of the comment or issue. Exported for the tests, which check that it never holds the
-// texts.
-function buildBody({ context, inputs, scores, flagged, subject, actions }) {
+// Where the flagged text was written: the comment or review for those events, else the pull
+// request, issue or discussion. Only a URL on this GitHub server is used.
+function sourceUrl(context) {
+  const payload = context.payload;
+  for (const url of [
+    payload.comment?.html_url,
+    payload.review?.html_url,
+    payload.pull_request?.html_url,
+    payload.issue?.html_url,
+    payload.discussion?.html_url,
+  ]) {
+    if (typeof url === 'string' && url.startsWith(`${context.serverUrl}/`) && /^[^\s()<>[\]]+$/.test(url)) return url;
+  }
+  return '';
+}
+
+// The body of the comment or issue, starting with the marker. Exported for the tests, which
+// check that it never holds the texts.
+function buildBody({ context, inputs, scores, flagged, subject, actions, sha = '' }) {
   const lines = [inputs.marker, '', `### Prompt Guard flagged ${subject}`, ''];
   if (inputs.notify.length > 0) lines.push(`${inputs.notify.join(' ')}: please review.`, '');
   lines.push(
@@ -56,15 +79,19 @@ function buildBody({ context, inputs, scores, flagged, subject, actions }) {
     lines.push(`| \`${name}\` | ${formatScore(score)} | ${flagged.includes(name) ? '**flagged**' : ''} |`);
   }
   lines.push('');
-  const sha = shortSha(context);
-  lines.push(`${sha ? `Commit \`${sha}\` · ` : ''}[Workflow run](${runUrl(context)})`);
+  const source = sourceUrl(context);
+  lines.push(
+    [source ? `[Source](${source})` : '', sha ? `Commit \`${sha}\`` : '', `[Workflow run](${runUrl(context)})`]
+      .filter(Boolean)
+      .join(' · '),
+  );
   if (actions.length > 0) lines.push('', `${actions.join(' ')}`);
   lines.push(
     '',
     'The score is a signal, not a judgement: it can flag harmless text and miss an injection. ' +
-      (subject === 'this pull request'
-        ? 'Remove the label and mark the pull request ready once it has been reviewed.'
-        : 'Close this issue once the texts have been reviewed.'),
+      'Every run flags the texts again while they score at or above the threshold; removing the label ' +
+      (subject === 'this pull request' ? 'or marking the pull request ready ' : 'or closing this issue ') +
+      "doesn't change that. Changing the text does.",
   );
   return lines.join('\n');
 }
@@ -92,6 +119,14 @@ function describe(error) {
   const status = error?.status ? `HTTP ${error.status}` : error?.name || 'error';
   const message = typeof error?.message === 'string' ? error.message.split('\n')[0].slice(0, 200) : '';
   return message ? `${status}: ${message}` : status;
+}
+
+const MINIMIZE_MUTATION =
+  'mutation($id: ID!) { minimizeComment(input: {subjectId: $id, classifier: OUTDATED}) { minimizedComment { isMinimized } } }';
+
+// One of the action's own comments or issues: by bot-login, with the marker at the start.
+function isOwn(item, inputs) {
+  return item.user?.login === inputs.botLogin && typeof item.body === 'string' && item.body.startsWith(inputs.marker);
 }
 
 const DRAFT_MUTATION =
@@ -137,26 +172,44 @@ async function escalatePullRequest({ github, context, core, inputs, scores, flag
     notes.push('It could not be converted to a draft.');
   }
 
-  const body = buildBody({ context, inputs, scores, flagged, subject: 'this pull request', actions: notes });
+  const body = buildBody({
+    context,
+    inputs,
+    scores,
+    flagged,
+    subject: 'this pull request',
+    actions: notes,
+    sha: commitSha(context, pull),
+  });
+
+  // The previous comment is looked up first, so that the new one is never mistaken for it.
+  let previous;
   try {
     const comments = await github.paginate(github.rest.issues.listComments, { ...repo, issue_number: number, per_page: 100 });
-    const existing = comments
-      .filter((comment) => comment.user?.login === inputs.botLogin && comment.body?.includes(inputs.marker))
-      .pop();
-    if (existing) {
-      await github.rest.issues.updateComment({ ...repo, comment_id: existing.id, body });
-    } else {
-      await github.rest.issues.createComment({ ...repo, issue_number: number, body });
-    }
+    previous = comments.filter((comment) => isOwn(comment, inputs)).pop();
+  } catch (error) {
+    core.warning(`Prompt Guard could not list the comments (${describe(error)}), so it minimizes none.`);
+  }
+
+  try {
+    await github.rest.issues.createComment({ ...repo, issue_number: number, body });
   } catch (error) {
     throw new EscalationError(`Prompt Guard could not post the comment on pull request #${number} (${describe(error)}).`);
+  }
+
+  if (previous?.node_id) {
+    try {
+      await github.graphql(MINIMIZE_MUTATION, { id: previous.node_id });
+    } catch (error) {
+      core.warning(`Prompt Guard could not minimize its previous comment (${describe(error)}).`);
+    }
   }
 }
 
 async function escalateIssue({ github, context, core, inputs, scores, flagged }) {
   const repo = context.repo;
   const subject = `untrusted text in a ${context.eventName} run`;
-  const body = buildBody({ context, inputs, scores, flagged, subject, actions: [] });
+  const body = buildBody({ context, inputs, scores, flagged, subject, actions: [], sha: commitSha(context) });
 
   if (inputs.label) {
     try {
@@ -176,9 +229,7 @@ async function escalateIssue({ github, context, core, inputs, scores, flagged })
       ...(inputs.label ? { labels: inputs.label } : { creator: inputs.botLogin }),
       per_page: 100,
     });
-    existing = issues.find(
-      (issue) => !issue.pull_request && issue.user?.login === inputs.botLogin && issue.body?.includes(inputs.marker),
-    );
+    existing = issues.find((issue) => !issue.pull_request && isOwn(issue, inputs));
   } catch (error) {
     throw new EscalationError(`Prompt Guard could not look for its open issue (${describe(error)}).`);
   }
@@ -224,4 +275,4 @@ async function escalate({ github, context, core, inputs, scores, flagged }) {
   else await escalateIssue({ github, context, core, inputs, scores, flagged });
 }
 
-module.exports = { EscalationError, buildBody, escalate, pullRequestNumber };
+module.exports = { EscalationError, buildBody, commitSha, escalate, pullRequestNumber, sourceUrl };

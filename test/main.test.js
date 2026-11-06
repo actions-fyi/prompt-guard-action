@@ -184,21 +184,56 @@ test('dry run in block mode still fails the step, without touching GitHub', asyn
   assert.equal(core.failed.length, 1);
 });
 
-test('an existing comment with the marker from github-actions[bot] is updated, and a draft is not converted again', async () => {
+// The graphql calls that minimized a comment, by node id.
+const minimized = (github) =>
+  github.calls.filter((c) => c.name === 'graphql' && c.query.includes('minimizeComment')).map((c) => c.variables.id);
+
+test('a second flag posts a new comment with the mentions and minimizes the previous one', async () => {
   const github = mockGithub({
     comments: [
-      { id: 1, user: { login: 'mallory' }, body: '<!-- prompt-guard --> fake' },
-      { id: 2, user: BOT, body: 'other bot comment' },
-      { id: 3, user: BOT, body: '<!-- prompt-guard -->\nold' },
+      { id: 1, node_id: 'IC_1', user: { login: 'mallory' }, body: '<!-- prompt-guard --> fake' },
+      { id: 2, node_id: 'IC_2', user: BOT, body: 'other bot comment' },
+      { id: 3, node_id: 'IC_3', user: BOT, body: '<!-- prompt-guard -->\nolder' },
+      { id: 4, node_id: 'IC_4', user: BOT, body: 'quoting <!-- prompt-guard --> later in the text' },
+      { id: 5, node_id: 'IC_5', user: BOT, body: '<!-- prompt-guard -->\nold' },
     ],
-    pull: { number: 7, state: 'open', draft: true, node_id: 'PR_node7' },
   });
+  const { core } = await run({ texts: { body: INJECTION }, github, PROMPT_GUARD_NOTIFY: '@octo-org/moderators' });
+  assert.equal(core.outputs.escalated, 'true');
+  assert.ok(!github.calls.some((c) => c.name === 'issues.updateComment'));
+  const created = github.calls.find((c) => c.name === 'issues.createComment').params;
+  assert.ok(created.body.startsWith('<!-- prompt-guard -->'));
+  assert.match(created.body, /@octo-org\/moderators: please review/);
+  // Only the latest of its own comments; earlier ones were minimized by earlier runs.
+  assert.deepEqual(minimized(github), ['IC_5']);
+  const names = github.calls.map((c) => c.name);
+  assert.ok(names.indexOf('issues.createComment') < names.lastIndexOf('graphql'));
+  assert.match(
+    github.calls.find((c) => c.name === 'graphql' && c.query.includes('minimizeComment')).query,
+    /classifier: OUTDATED/,
+  );
+});
+
+test('a comment that fails to minimize is only a warning', async () => {
+  const github = mockGithub({ comments: [{ id: 5, node_id: 'IC_5', user: BOT, body: '<!-- prompt-guard -->\nold' }] });
+  const graphql = github.graphql;
+  github.graphql = async (query, variables) => {
+    if (query.includes('minimizeComment')) {
+      github.calls.push({ name: 'graphql', query, variables });
+      throw Object.assign(new Error('Resource not accessible by integration'), { status: 403 });
+    }
+    return graphql(query, variables);
+  };
   const { core } = await run({ texts: { body: INJECTION }, github });
   assert.equal(core.outputs.escalated, 'true');
-  const names = github.calls.map((c) => c.name);
-  assert.ok(!names.includes('issues.createComment'));
-  assert.ok(!names.includes('graphql'));
-  assert.equal(github.calls.find((c) => c.name === 'issues.updateComment').params.comment_id, 3);
+  assert.deepEqual(core.failed, []);
+  assert.ok(core.logs.some((l) => /could not minimize its previous comment \(HTTP 403/.test(l)));
+});
+
+test('a draft pull request is not converted again', async () => {
+  const github = mockGithub({ pull: { number: 7, state: 'open', draft: true, node_id: 'PR_node7' } });
+  await run({ texts: { body: INJECTION }, github });
+  assert.ok(!github.calls.some((c) => c.name === 'graphql' && c.query.includes('convertPullRequestToDraft')));
 });
 
 test('a missing label is created before it is added', async () => {
@@ -233,7 +268,7 @@ test('other events open one labeled issue, and comment on it while it is open', 
   assert.deepEqual(created.labels, ['prompt-guard:flagged']);
   assert.match(created.body, /@octo-org\/moderators/);
   assert.match(created.body, /workflow_dispatch run/);
-  assert.match(created.body, /Close this issue once the texts have been reviewed/);
+  assert.match(created.body, /removing the label or closing this issue doesn't change that\. Changing the text does\./);
   // The label stuck, so it isn't added again.
   assert.ok(!fresh.calls.some((c) => c.name === 'issues.addLabels'));
 
@@ -276,7 +311,7 @@ test('without a label, the issue is found by bot-login as its creator', async ()
 test('the marker comment is found across pages', async () => {
   const page = (from) => Array.from({ length: 3 }, (_, i) => ({ id: from + i, user: { login: 'someone' }, body: 'hi' }));
   const github = mockGithub({
-    comments: [page(1), [...page(10), { id: 42, user: BOT, body: '<!-- prompt-guard -->\nold' }], page(20)],
+    comments: [page(1), [...page(10), { id: 42, node_id: 'IC_42', user: BOT, body: '<!-- prompt-guard -->\nold' }], page(20)],
   });
   const { core } = await run({ texts: { body: INJECTION }, github });
   assert.equal(core.outputs.escalated, 'true');
@@ -284,19 +319,19 @@ test('the marker comment is found across pages', async () => {
     github.calls.filter((c) => c.name === 'issues.listComments').map((c) => c.params.page),
     [1, 2, 3, 4],
   );
-  assert.equal(github.calls.find((c) => c.name === 'issues.updateComment').params.comment_id, 42);
-  assert.ok(!github.calls.some((c) => c.name === 'issues.createComment'));
+  assert.deepEqual(minimized(github), ['IC_42']);
+  assert.ok(github.calls.some((c) => c.name === 'issues.createComment'));
 });
 
 test('a custom bot-login matches its own comment and ignores github-actions[bot]', async () => {
   const github = mockGithub({
     comments: [
-      { id: 1, user: BOT, body: '<!-- prompt-guard -->' },
-      { id: 2, user: { login: 'my-app[bot]' }, body: '<!-- prompt-guard -->' },
+      { id: 2, node_id: 'IC_2', user: { login: 'my-app[bot]' }, body: '<!-- prompt-guard -->' },
+      { id: 1, node_id: 'IC_1', user: BOT, body: '<!-- prompt-guard -->' },
     ],
   });
   await run({ texts: { body: INJECTION }, github, PROMPT_GUARD_BOT_LOGIN: 'my-app[bot]' });
-  assert.equal(github.calls.find((c) => c.name === 'issues.updateComment').params.comment_id, 2);
+  assert.deepEqual(minimized(github), ['IC_2']);
 });
 
 test('a label with a comma is a configuration error that names the input, not the value', async () => {
@@ -357,7 +392,16 @@ test('when pulls.get fails, the event copy is used, and the comment is still pos
   assert.match(comment.calls.find((c) => c.name === 'issues.createComment').params.body, /It could not be converted to a draft\./);
 });
 
-for (const failing of ['issues.createComment', 'issues.listComments']) {
+test('comments that cannot be listed are a warning, and the new comment is still posted', async () => {
+  const github = mockGithub({ fail: ['issues.listComments'] });
+  const { core } = await run({ texts: { body: INJECTION }, github });
+  assert.equal(core.outputs.escalated, 'true');
+  assert.deepEqual(core.failed, []);
+  assert.ok(core.logs.some((l) => /could not list the comments/.test(l)));
+  assert.ok(github.calls.some((c) => c.name === 'issues.createComment'));
+});
+
+for (const failing of ['issues.createComment']) {
   test(`a comment that can't be posted (${failing}) fails the step in audit mode, and keeps the verdict`, async () => {
     const github = mockGithub({ fail: [failing] });
     const { verdict, core } = await run({ texts: { body: INJECTION }, github });
@@ -620,4 +664,60 @@ test('an address with a path prefix keeps it', async () => {
     'https://gw.example.test/tei/tokenize',
     'https://gw.example.test/tei/predict',
   ]);
+});
+
+const bodyOf = (github, name = 'issues.createComment') => github.calls.find((c) => c.name === name).params.body;
+
+test('the comment links the pull request and names its head from pulls.get', async () => {
+  const github = mockGithub({ pull: { number: 7, state: 'open', draft: false, node_id: 'PR_node7', head: { sha: 'abcdef0123456789abcdef0123456789abcdef01' } } });
+  const context = prContext();
+  context.payload.pull_request.html_url = 'https://github.com/octo-org/octo-repo/pull/7';
+  await run({ texts: { body: INJECTION }, github, context });
+  assert.match(bodyOf(github), /\[Source\]\(https:\/\/github\.com\/octo-org\/octo-repo\/pull\/7\) · Commit `abcdef0` · \[Workflow run\]/);
+});
+
+test('on a comment on a pull request, the source is the comment, and the commit only comes from pulls.get', async () => {
+  const payload = {
+    issue: { number: 9, pull_request: {}, html_url: 'https://github.com/octo-org/octo-repo/pull/9' },
+    comment: { html_url: 'https://github.com/octo-org/octo-repo/pull/9#issuecomment-123' },
+  };
+  const withHead = mockGithub({ pull: { number: 9, state: 'open', draft: false, node_id: 'PR_9', head: { sha: '9999999aaaaaaa' } } });
+  await run({ texts: { body: INJECTION }, github: withHead, context: prContext({ eventName: 'issue_comment', payload }) });
+  assert.match(bodyOf(withHead), /\[Source\]\(https:\/\/github\.com\/octo-org\/octo-repo\/pull\/9#issuecomment-123\) · Commit `9999999` ·/);
+
+  // Without pulls.get, context.sha is the default branch, not the pull request, so no commit.
+  const without = mockGithub({ fail: ['pulls.get'] });
+  await run({ texts: { body: INJECTION }, github: without, context: prContext({ eventName: 'issue_comment', payload }) });
+  assert.doesNotMatch(bodyOf(without), /Commit/);
+  assert.match(bodyOf(without), /\[Source\]\(https:\/\/github\.com\/octo-org\/octo-repo\/pull\/9#issuecomment-123\)/);
+});
+
+test('the issue names the source and a push commit, and nothing it cannot vouch for', async () => {
+  const issueEvent = mockGithub();
+  await run({
+    texts: { body: INJECTION },
+    github: issueEvent,
+    context: prContext({ eventName: 'issues', payload: { issue: { number: 3, html_url: 'https://github.com/octo-org/octo-repo/issues/3' } } }),
+  });
+  const issueBody = bodyOf(issueEvent, 'issues.create');
+  assert.match(issueBody, /^<!-- prompt-guard -->/);
+  assert.match(issueBody, /\[Source\]\(https:\/\/github\.com\/octo-org\/octo-repo\/issues\/3\) · \[Workflow run\]/);
+  assert.doesNotMatch(issueBody, /Commit/);
+
+  const push = mockGithub();
+  await run({ texts: { body: INJECTION }, github: push, context: prContext({ eventName: 'push', payload: { after: 'cafebabe00112233' } }) });
+  assert.match(bodyOf(push, 'issues.create'), /^Commit `cafebab` · \[Workflow run\]/m);
+
+  const schedule = mockGithub();
+  await run({ texts: { body: INJECTION }, github: schedule, context: prContext({ eventName: 'schedule', payload: {} }) });
+  assert.match(bodyOf(schedule, 'issues.create'), /^\[Workflow run\]\(https:\/\/github\.com\/octo-org\/octo-repo\/actions\/runs\/4242\)$/m);
+
+  // A URL on another host, or one that would break the link, is left out.
+  const foreign = mockGithub();
+  await run({
+    texts: { body: INJECTION },
+    github: foreign,
+    context: prContext({ eventName: 'issues', payload: { issue: { number: 3, html_url: 'https://evil.example/x' }, comment: { html_url: 'https://github.com/a) [x](y' } } }),
+  });
+  assert.doesNotMatch(bodyOf(foreign, 'issues.create'), /Source/);
 });

@@ -135,25 +135,38 @@ Only when a text is flagged and it's not a dry run.
   1. the `label`, created if missing;
   2. a conversion to a draft (GraphQL `convertPullRequestToDraft`), so it isn't merged or picked
      up as ready while someone looks;
-  3. one comment, found by `marker` among the comments of `bot-login` and updated by later runs,
-     mentioning `notify`. It says whether the label was added and whether the pull request was
-     converted to a draft.
+  3. a new comment, mentioning `notify`, that says whether the label was added and whether the
+     pull request was converted to a draft. Every flag posts a new one, because GitHub sends no
+     notifications for mentions in an edited comment;
+  4. the previous comment of `bot-login` that starts with `marker` is minimized as outdated
+     (GraphQL `minimizeComment`).
 - **Other events**: one open issue with the `label` and the marker, opened by `bot-login`. Later
-  runs find it by the label and comment on it while it's open, mentioning `notify`. Without a
-  label, it is found by its creator, `bot-login`.
+  runs find it by the label and add a comment, mentioning `notify` again. Without a label, it is
+  found by its creator, `bot-login`.
 
-The label and the draft are best effort: if one fails, the action logs a warning and the comment
-says so. A `GITHUB_TOKEN` may not be allowed to convert a pull request to a draft. The comment or
-the issue is the escalation itself: if it can't be posted, `escalated` is `false` and the step
-fails, also in audit mode, because a flag nobody hears about is no use.
+The action's comments and issues start with the marker, and only those that start with it, by
+`bot-login`, count as its own: quoting the marker elsewhere matches nothing.
 
-The comment and the issue never quote the flagged text: they list the names, scores, threshold,
-commit and a link to the run, nothing else. Close the issue, or remove the label and mark the pull
-request ready, once someone has looked. The action never un-flags anything itself.
+The label, the draft and minimizing are best effort: if one fails, the action logs a warning, and
+the comment says so for the first two. A `GITHUB_TOKEN` may not be allowed to convert a pull
+request to a draft. The comment or the issue is the escalation itself: if it can't be posted,
+`escalated` is `false` and the step fails, also in audit mode, because a flag nobody hears about is
+no use.
+
+The comment and the issue never quote the flagged text. They list the names, scores and
+threshold, and link the source: the comment or review the text came from, else the pull request,
+issue or discussion. They name the commit only where the event has one, a pull request's head or
+a push, and link the run.
+
+**There is no way to acknowledge a flag.** Many people can add or remove a label, so neither the
+label nor the draft state is a bypass: every run flags a text again, and escalates again, while it
+scores at or above the threshold. The remedy is to change the text. The action never un-flags
+anything; close the issue, or remove the label and mark the pull request ready, once the text has
+been changed and screens clean.
 
 With a `github-token` other than the workflow's, a personal access token or an app's token, set
-`bot-login` to the login it posts as, e.g. `my-app[bot]`, or the action won't find its own
-comment and issue again.
+`bot-login` to the login it posts as, e.g. `my-app[bot]`, or the action won't recognise its own
+comments and issue.
 
 ## How long texts are scored
 
