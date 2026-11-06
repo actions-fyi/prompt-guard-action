@@ -114,3 +114,41 @@ test('a missing payload field is a warning, an escaping file is the verdict erro
   assert.match(escaping.core.failed[0], /outside files-directory/);
   assert.equal(escaping.tei.calls.length, 0);
 });
+
+test('require-fields makes a missing path an error, naming it', () => {
+  const payload = { pull_request: { title: 'T', body: null } };
+  const fields = ['pull_request.title', 'pull_request.bdy', 'issue.body'];
+  assert.deepEqual(collectTexts(sources({ payloadFields: fields }), payload).missing, ['pull_request.bdy', 'issue.body']);
+  assert.throws(
+    () => collectTexts(sources({ payloadFields: fields, requireFields: true }), payload),
+    /not in the event payload: pull_request\.bdy, issue\.body\. Check their spelling/,
+  );
+  // null is present, just empty.
+  assert.deepEqual(collectTexts(sources({ payloadFields: ['pull_request.body'], requireFields: true }), payload).empty, ['pull_request.body']);
+});
+
+test('require-fields through main: a misspelled field is the verdict error, not clean', async () => {
+  const run = async (requireFields) => {
+    const core = mockCore();
+    const tei = mockTei();
+    const context = prContext();
+    context.payload.pull_request.title = 'Hello';
+    const verdict = await main({
+      github: mockGithub(),
+      context,
+      core,
+      env: { ...env(), PROMPT_GUARD_PAYLOAD_FIELDS: 'pull_request.title, pull_request.bdy', PROMPT_GUARD_REQUIRE_FIELDS: requireFields },
+      fetch: tei.fetch,
+      sleep: noSleep,
+    });
+    return { verdict, core, tei };
+  };
+  const lenient = await run('false');
+  assert.equal(lenient.verdict, 'clean');
+  assert.ok(lenient.core.logs.includes('pull_request.bdy: not in the event payload, skipped.'));
+  const strict = await run('true');
+  assert.equal(strict.verdict, 'error');
+  assert.equal(strict.tei.calls.length, 0);
+  assert.match(strict.core.failed[0], /pull_request\.bdy/);
+  assert.equal((await run('sometimes')).verdict, 'error');
+});

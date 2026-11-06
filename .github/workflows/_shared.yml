@@ -72,6 +72,13 @@ on:
           clean.
         type: boolean
         default: true
+      require-fields:
+        description: >-
+          Whether a payload-fields path that isn't in the event payload is an error. Turn it on
+          where every path must exist: otherwise a misspelled path such as pull_request.bdy is
+          only skipped with a warning.
+        type: boolean
+        default: false
       threshold:
         description: The score, between 0 and 1, at or above which a text is flagged.
         type: string
@@ -249,6 +256,7 @@ jobs:
           files: ${{ inputs.files }}
           files-directory: ${{ steps.artifact.outputs.path }}
           require-text: ${{ inputs.require-text }}
+          require-fields: ${{ inputs.require-fields }}
           threshold: ${{ inputs.threshold }}
           mode: ${{ inputs.mode }}
           dry-run: ${{ inputs.dry-run }}

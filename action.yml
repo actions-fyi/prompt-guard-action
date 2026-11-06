@@ -98,6 +98,14 @@ inputs:
       error. false makes it a warning and the verdict clean.
     required: false
     default: "true"
+  require-fields:
+    description: >-
+      Whether a payload-fields path that isn't in the event payload is the verdict error. Turn it
+      on where every path must exist: otherwise a misspelled path such as pull_request.bdy is
+      skipped with a warning, and the run can look clean although nothing was screened. Leave it
+      off for paths that only some events carry.
+    required: false
+    default: "false"
   allow-insecure-address:
     description: Whether address may be plain http, which sends the credentials unencrypted.
     required: false
@@ -150,6 +158,7 @@ runs:
         PROMPT_GUARD_MALICIOUS_LABEL: ${{ inputs.malicious-label }}
         PROMPT_GUARD_BOT_LOGIN: ${{ inputs.bot-login }}
         PROMPT_GUARD_REQUIRE_TEXT: ${{ inputs.require-text }}
+        PROMPT_GUARD_REQUIRE_FIELDS: ${{ inputs.require-fields }}
         PROMPT_GUARD_ALLOW_INSECURE_ADDRESS: ${{ inputs.allow-insecure-address }}
       with:
         github-token: ${{ inputs.github-token }}

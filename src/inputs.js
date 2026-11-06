@@ -36,6 +36,7 @@ const ENV = {
   maliciousLabel: 'PROMPT_GUARD_MALICIOUS_LABEL',
   botLogin: 'PROMPT_GUARD_BOT_LOGIN',
   requireText: 'PROMPT_GUARD_REQUIRE_TEXT',
+  requireFields: 'PROMPT_GUARD_REQUIRE_FIELDS',
   allowInsecureAddress: 'PROMPT_GUARD_ALLOW_INSECURE_ADDRESS',
 };
 
@@ -202,6 +203,7 @@ function parseInputs(env = process.env) {
     address: parseAddress(read(env, ENV.address), allowInsecureAddress),
     allowInsecureAddress,
     requireText: parseBoolean(read(env, ENV.requireText) || 'true', 'require-text'),
+    requireFields: parseBoolean(read(env, ENV.requireFields) || 'false', 'require-fields'),
     apiKey: read(env, ENV.apiKey),
     accessClientId,
     accessClientSecret,

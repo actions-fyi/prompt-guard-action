@@ -62,6 +62,12 @@ function collectTexts(inputs, payload) {
     else throw new ConfigError(`The payload field ${field} is not a string.`);
   }
 
+  // A misspelled path, e.g. pull_request.bdy, is missing from every payload, so without
+  // require-fields it would only ever be skipped, and the run look clean.
+  if (inputs.requireFields && missing.length > 0) {
+    throw new ConfigError(`payload-fields names paths that are not in the event payload: ${missing.join(', ')}. Check their spelling, or set require-fields to false.`);
+  }
+
   if (inputs.files.length > 0) {
     let directory;
     try {
