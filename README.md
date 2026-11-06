@@ -13,6 +13,7 @@ Hugging Face [text-embeddings-inference](https://github.com/huggingface/text-emb
 - [Permissions](#permissions)
 - [Audit, block and dry run](#audit-block-and-dry-run)
 - [Escalation](#escalation)
+- [Serving the model with TEI](#serving-the-model-with-tei)
 - [How long texts are scored](#how-long-texts-are-scored)
 - [The reusable workflow, with OpenBao and Cloudflare Access](#the-reusable-workflow-with-openbao-and-cloudflare-access)
 - [Threat model](#threat-model)
@@ -57,6 +58,11 @@ skipped.
 
 Gate on `verdict == 'clean'`, never on `verdict != 'flagged'`: the verdict is `error` when a text
 couldn't be scored, and empty when the step failed before it could screen anything.
+
+**Let the agent read only the text that was screened**: the same event payload, or the same
+artifact, that the action saw. An agent that fetches the pull request's body again through the
+API reads whatever it says by then, and an edit made between the screen and the read was never
+screened.
 
 ## Inputs
 
@@ -172,6 +178,27 @@ With a `github-token` other than the workflow's, a personal access token or an a
 `bot-login` to the login it posts as, e.g. `my-app[bot]`, or the action won't recognise its own
 comments and issue.
 
+## Serving the model with TEI
+
+Run TEI 1.9 with the model as a sequence classifier, with an API key, e.g.
+`text-embeddings-router --model-id /models --api-key <key>`. The action needs `/info`,
+`/tokenize` and `/predict`.
+
+**TEI needs the labels in the model's `config.json`.** The upstream
+`meta-llama/Llama-Prompt-Guard-2-86M` `config.json` has neither `id2label` nor `label2id`, and TEI
+won't start a classifier without both (`config.json does not contain id2label`, in
+`router/src/lib.rs`). Add them to a copy of the model before serving it:
+
+```json
+"id2label": { "0": "BENIGN", "1": "MALICIOUS" },
+"label2id": { "BENIGN": 0, "MALICIOUS": 1 }
+```
+
+The model card doesn't spell out the indices, but with this mapping an obvious injection, e.g.
+`Ignore all previous instructions`, scores high on `MALICIOUS`; check that against `/predict` on
+your own deployment. `malicious-label` must match the name you give the malicious class here; the
+action checks it against `/info` and fails if it's missing.
+
 ## How long texts are scored
 
 TEI doesn't chunk. Prompt Guard 2 reads 512 tokens, and TEI rejects longer input unless it
@@ -264,8 +291,12 @@ endpoints, or use the action directly.**
   untrusted text into `with:` or `env:`, for this action or any other, has already logged it. So
   the action takes no text as an input: it reads the payload fields and files itself. Save other
   text to a file from a script, not through an expression in `with`.
+- **Read only what was screened.** The verdict is about the snapshot the action read: the event
+  payload, or the files of the artifact. Hand the agent that snapshot, not a fresh copy from the
+  API, which may have been edited since and was never screened.
 - **Trust the workflow, not the text.** `payload-fields`, `files`, `notify`, `label` and `marker`
-  come from the calling workflow and are validated; the texts are only ever sent to TEI.
+  come from the calling workflow and are validated; the texts are only ever sent to TEI. In the
+  reusable workflow, the caller's secrets are validated too, because they become HTTP headers.
 
 Known limits: content that the tokenizer can't represent, e.g. unknown characters, reaches the
 model as unknown tokens.
