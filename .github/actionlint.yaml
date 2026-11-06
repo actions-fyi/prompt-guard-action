@@ -1,3 +1,5 @@
+# Read by the org's actionlint ruleset workflow, which lints this repository's pull requests.
+#
 # `uses: $/` in _shared.yml is GitHub's self repository reference to this repository's root
 # action, at the commit the workflow runs at; gh actions-lock classifies a bare `$/` as the
 # repository root action too. actionlint (kjanat/actionlint 1.17.0) only accepts `$/` followed by
