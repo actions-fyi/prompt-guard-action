@@ -73,7 +73,7 @@ couldn't be scored, and empty when the step failed before it could screen anythi
 | `require-text` | `true` | Whether finding nothing to screen, every field and file empty or missing, is the verdict `error`. With `false` it's a warning, and the verdict `clean`. |
 | `allow-insecure-address` | `false` | Allow a plain `http` address, e.g. a TEI on the runner's own network. The API key and the Access values are then sent unencrypted, and the action warns about it. |
 | `notify` | `""` | Handles to mention when escalating, e.g. `@my-org/moderators @octocat`. |
-| `label` | `prompt-guard:flagged` | The label for a flagged pull request or the escalation issue. Empty adds none. |
+| `label` | `prompt-guard:flagged` | The label for a flagged pull request or the escalation issue. Empty adds none. At most 50 characters on one line, without commas (the issue lookup filters by it, and GitHub splits that filter at commas) or `` ` ``, `<` and `>`. |
 | `marker` | `<!-- prompt-guard -->` | The hidden HTML comment that identifies this action's comment or issue. Use a different one per workflow if several screen the same pull request. |
 | `malicious-label` | `MALICIOUS` | The model's label whose score is compared with the threshold. It must be one of the labels in TEI's `/info`. |
 | `github-token` | `${{ github.token }}` | The token for escalation. |

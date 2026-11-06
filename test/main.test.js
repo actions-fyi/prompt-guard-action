@@ -299,6 +299,15 @@ test('a custom bot-login matches its own comment and ignores github-actions[bot]
   assert.equal(github.calls.find((c) => c.name === 'issues.updateComment').params.comment_id, 2);
 });
 
+test('a label with a comma is a configuration error that names the input, not the value', async () => {
+  const { verdict, core, tei, github } = await run({ texts: { body: INJECTION }, PROMPT_GUARD_LABEL: 'prompt-guard,flagged' });
+  assert.equal(verdict, 'error');
+  assert.equal(tei.calls.length, 0);
+  assert.deepEqual(github.calls, []);
+  assert.match(core.failed[0], /label must not contain a comma/);
+  assert.ok(!core.failed[0].includes('prompt-guard,flagged'));
+});
+
 test('an invalid bot-login is a configuration error', async () => {
   const { verdict, tei } = await run({ texts: { body: 'hi' }, PROMPT_GUARD_BOT_LOGIN: 'not a login' });
   assert.equal(verdict, 'error');

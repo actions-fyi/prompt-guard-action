@@ -183,6 +183,9 @@ function parseInputs(env = process.env) {
   if (label && !LABEL.test(label)) {
     throw new ConfigError('label must be a single line of at most 50 characters without `, < or >.');
   }
+  // The issue lookup passes the label as listForRepo's labels parameter, which GitHub splits at
+  // commas, so a label with a comma would never find its own issue.
+  if (label.includes(',')) throw new ConfigError('label must not contain a comma.');
 
   const marker = read(env, ENV.marker) || '<!-- prompt-guard -->';
   if (!MARKER.test(marker)) throw new ConfigError('marker must be a one-line HTML comment, e.g. <!-- prompt-guard -->.');
