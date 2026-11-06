@@ -7,6 +7,7 @@
 // doesn't understand, gives the verdict error and fails the step, in every mode.
 
 const { ConfigError, SECRET_ENV, parseInputs } = require('./inputs');
+const { collectTexts } = require('./sources');
 const { TeiError, createClient, parseInfo, scoreText } = require('./tei');
 const { decide, formatScore } = require('./verdict');
 const { EscalationError, escalate } = require('./escalate');
@@ -39,12 +40,14 @@ module.exports = async function main({ github, context, core, env = process.env,
   let inputs;
   try {
     inputs = parseInputs(env);
-    for (const name of inputs.skipped) core.info(`${name}: empty, skipped.`);
+    const { texts, empty, missing } = collectTexts(inputs, context.payload);
+    for (const name of empty) core.info(`${name}: empty, skipped.`);
+    for (const name of missing) core.warning(`${name}: not in the event payload, skipped.`);
 
-    if (inputs.texts.length > 0) {
+    if (texts.length > 0) {
       const client = createClient({ ...inputs, fetch, sleep });
       const info = parseInfo(await client.info(), inputs.maliciousLabel);
-      for (const { name, text } of inputs.texts) {
+      for (const { name, text } of texts) {
         const { score, windows } = await scoreText(client, info, text, inputs.maliciousLabel);
         outputs.scores[name] = score;
         core.info(`${name}: ${formatScore(score)} (${windows} ${windows === 1 ? 'window' : 'windows'}).`);

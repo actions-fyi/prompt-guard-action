@@ -195,12 +195,19 @@ function prContext(overrides = {}) {
   };
 }
 
+const DEFAULT_TEXTS = { title: 'What is the capital of France?' };
+
+// The texts go into the event payload, at the top level, so that each name is its own path.
+function withTexts(context, texts = DEFAULT_TEXTS) {
+  return { ...context, payload: { ...context.payload, ...texts } };
+}
+
 function env(overrides = {}) {
   const { texts, ...rest } = overrides;
   return {
     PROMPT_GUARD_ADDRESS: 'https://tei.example.test',
     PROMPT_GUARD_API_KEY: 'test-api-key',
-    PROMPT_GUARD_TEXTS: JSON.stringify(texts ?? { title: 'What is the capital of France?' }),
+    PROMPT_GUARD_PAYLOAD_FIELDS: Object.keys(texts ?? DEFAULT_TEXTS).join(', '),
     PROMPT_GUARD_THRESHOLD: '0.5',
     PROMPT_GUARD_MODE: 'audit',
     PROMPT_GUARD_DRY_RUN: 'false',
@@ -220,4 +227,18 @@ function filler(count, offset = 0) {
 
 const noSleep = async () => {};
 
-module.exports = { TRIGGER, BOT, json, tokenize, mockTei, mockCore, mockGithub, forbiddenGithub, prContext, env, filler, noSleep };
+module.exports = {
+  TRIGGER,
+  BOT,
+  json,
+  tokenize,
+  mockTei,
+  mockCore,
+  mockGithub,
+  forbiddenGithub,
+  prContext,
+  withTexts,
+  env,
+  filler,
+  noSleep,
+};

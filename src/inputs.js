@@ -1,10 +1,16 @@
 'use strict';
 
+const path = require('node:path');
+
 // Reads and validates the action's inputs. action.yml passes every input through the step's env,
 // never by interpolating it into the script, so these values are data, not code.
 //
-// Error messages name the input that is wrong, never its value: the texts are untrusted, and the
-// API key and the Access values are secrets.
+// The texts themselves never pass through an input: the runner prints every input and env value
+// of a step in its log. Inputs only say where the texts are, in the event payload or in files,
+// and sources.js reads them.
+//
+// Error messages name the input that is wrong, never its value: the API key and the Access values
+// are secrets.
 
 class ConfigError extends Error {
   constructor(message) {
@@ -18,7 +24,9 @@ const ENV = {
   apiKey: 'PROMPT_GUARD_API_KEY',
   accessClientId: 'PROMPT_GUARD_ACCESS_CLIENT_ID',
   accessClientSecret: 'PROMPT_GUARD_ACCESS_CLIENT_SECRET',
-  texts: 'PROMPT_GUARD_TEXTS',
+  payloadFields: 'PROMPT_GUARD_PAYLOAD_FIELDS',
+  files: 'PROMPT_GUARD_FILES',
+  filesDirectory: 'PROMPT_GUARD_FILES_DIRECTORY',
   threshold: 'PROMPT_GUARD_THRESHOLD',
   mode: 'PROMPT_GUARD_MODE',
   dryRun: 'PROMPT_GUARD_DRY_RUN',
@@ -33,6 +41,10 @@ const SECRET_ENV = [ENV.apiKey, ENV.accessClientId, ENV.accessClientSecret];
 
 // Text names end up in outputs, logs and comments, so they are kept to a plain identifier.
 const NAME = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
+// A dot path into the event payload, e.g. pull_request.body. It is also the text's name.
+const PAYLOAD_FIELD = /^[A-Za-z0-9_]+(\.[A-Za-z0-9_]+)*$/;
+// Segments that would walk into an object's prototype instead of its own fields.
+const FORBIDDEN_SEGMENTS = new Set(['__proto__', 'prototype', 'constructor']);
 // A user (@octocat) or a team (@org/team). The @ is optional in the input.
 const HANDLE = /^@?([A-Za-z0-9](?:[A-Za-z0-9-]{0,38})(?:\/[A-Za-z0-9][A-Za-z0-9_.-]{0,99})?)$/;
 // Labels are free text on GitHub, but a short single line keeps them out of markup trouble.
@@ -70,36 +82,37 @@ function parseAddress(value) {
   return url.href.endsWith('/') ? url.href : `${url.href}/`;
 }
 
-function parseTexts(value) {
-  if (!value) throw new ConfigError('texts is required: a JSON object mapping names to texts.');
-  let parsed;
-  try {
-    parsed = JSON.parse(value);
-  } catch {
-    // JSON.parse's own message quotes part of the input, which is untrusted text.
-    throw new ConfigError('texts must be a JSON object mapping names to texts, but it is not valid JSON.');
-  }
-  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new ConfigError('texts must be a JSON object mapping names to texts.');
-  }
-  const texts = [];
-  const skipped = [];
-  for (const [name, text] of Object.entries(parsed)) {
-    if (!NAME.test(name)) {
+function parsePayloadFields(value) {
+  const fields = [];
+  for (const field of value.split(/[\s,]+/).filter(Boolean)) {
+    if (field.length > 100 || !PAYLOAD_FIELD.test(field)) {
       throw new ConfigError(
-        'Each name in texts must start with a letter or digit and hold only letters, digits, ".", "_" and "-", at most 64 characters.',
+        'payload-fields must list dot paths into the event payload, e.g. pull_request.title, of letters, digits and "_".',
       );
     }
-    // A missing field, e.g. the body of a pull request without a description, arrives as null.
-    if (text === null || (typeof text === 'string' && text.trim() === '')) {
-      skipped.push(name);
-    } else if (typeof text === 'string') {
-      texts.push({ name, text });
-    } else {
-      throw new ConfigError(`texts.${name} must be a string or null.`);
+    if (field.split('.').some((segment) => FORBIDDEN_SEGMENTS.has(segment))) {
+      throw new ConfigError('payload-fields must not contain the segments __proto__, prototype or constructor.');
     }
+    if (!fields.includes(field)) fields.push(field);
   }
-  return { texts, skipped };
+  return fields;
+}
+
+function parseFiles(value) {
+  const files = [];
+  for (const line of value.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)) {
+    const separator = line.indexOf('=');
+    const name = separator > 0 ? line.slice(0, separator).trim() : '';
+    const file = separator > 0 ? line.slice(separator + 1).trim() : '';
+    if (!NAME.test(name) || !file || file.includes('\0')) {
+      throw new ConfigError(
+        'files must hold one name=path pair per line. Names start with a letter or digit and hold only letters, digits, ".", "_" and "-", at most 64 characters.',
+      );
+    }
+    if (files.some((f) => f.name === name)) throw new ConfigError(`files names ${name} twice.`);
+    files.push({ name, file });
+  }
+  return files;
 }
 
 function parseThreshold(value) {
@@ -125,6 +138,22 @@ function parseNotify(value) {
     if (!handles.includes(handle)) handles.push(handle);
   }
   return handles;
+}
+
+function parseSources(env) {
+  const payloadFields = parsePayloadFields(read(env, ENV.payloadFields));
+  const files = parseFiles(env[ENV.files] ?? '');
+  if (payloadFields.length === 0 && files.length === 0) {
+    throw new ConfigError('Nothing to screen: set payload-fields, files, or both.');
+  }
+  const filesDirectory = read(env, ENV.filesDirectory) || read(env, 'GITHUB_WORKSPACE');
+  if (files.length > 0 && !(filesDirectory && path.isAbsolute(filesDirectory))) {
+    throw new ConfigError('files-directory must be an absolute path; it defaults to GITHUB_WORKSPACE.');
+  }
+  const names = [...payloadFields, ...files.map((f) => f.name)];
+  const duplicate = names.find((name, i) => names.indexOf(name) !== i);
+  if (duplicate) throw new ConfigError(`${duplicate} is named in both payload-fields and files.`);
+  return { payloadFields, files, filesDirectory };
 }
 
 function parseInputs(env = process.env) {
@@ -156,7 +185,7 @@ function parseInputs(env = process.env) {
     apiKey: read(env, ENV.apiKey),
     accessClientId,
     accessClientSecret,
-    ...parseTexts(env[ENV.texts] ?? ''),
+    ...parseSources(env),
     threshold: parseThreshold(read(env, ENV.threshold) || '0.5'),
     mode,
     dryRun: parseBoolean(read(env, ENV.dryRun) || 'false', 'dry-run'),
@@ -167,4 +196,4 @@ function parseInputs(env = process.env) {
   };
 }
 
-module.exports = { ConfigError, ENV, SECRET_ENV, parseInputs };
+module.exports = { ConfigError, ENV, SECRET_ENV, FORBIDDEN_SEGMENTS, parseInputs };

@@ -38,9 +38,7 @@ jobs:
         with:
           address: https://prompt-guard.example.com
           api-key: ${{ secrets.PROMPT_GUARD_API_KEY }}
-          texts: >-
-            {"title": ${{ toJSON(github.event.pull_request.title) }},
-            "body": ${{ toJSON(github.event.pull_request.body) }}}
+          payload-fields: pull_request.title, pull_request.body
           notify: "@my-org/moderators"
 
   review:
@@ -50,8 +48,10 @@ jobs:
     # ...
 ```
 
-`toJSON` turns each field into a JSON string, quotes and newlines escaped, so `texts` is valid JSON
-whatever the text holds. A pull request without a description has a `null` body, which is
+The action reads the texts itself: `payload-fields` names fields of the event payload, and
+`files` names files, e.g. a previous bot comment that an earlier step saved. The texts never pass
+through `with` or `env`, because the runner prints those in the log; see the
+[threat model](#threat-model). A pull request without a description has a `null` body, which is
 skipped.
 
 Gate on `verdict == 'clean'`, never on `verdict != 'flagged'`: the verdict is `error` when a text
@@ -65,7 +65,9 @@ couldn't be scored, and empty when the step failed before it could screen anythi
 | `api-key` | `""` | TEI's API key (`--api-key`), sent as `Authorization: Bearer`. |
 | `access-client-id` | `""` | The client ID of a Cloudflare Access service token, sent as `CF-Access-Client-Id`. |
 | `access-client-secret` | `""` | Its client secret, sent as `CF-Access-Client-Secret`. Set both Access values or neither; one alone is a configuration error, and nothing is sent. |
-| `texts` | required | A JSON object mapping a name to a text. Names are letters, digits, `.`, `_` and `-`, at most 64 characters. Empty and `null` texts are skipped. |
+| `payload-fields` | `""` | Dot paths into the event payload, separated by newlines or commas, e.g. `pull_request.title, pull_request.body`. Each path is the text's name. Paths are letters, digits and `_` between dots; `__proto__`, `prototype` and `constructor` are refused. Empty and `null` fields are skipped, a missing one is a warning, and any other value than a string is an error. |
+| `files` | `""` | Files to screen, one `name=path` per line, e.g. `comment=previous-comment.md`. Names are letters, digits, `.`, `_` and `-`, at most 64 characters. Paths are relative to `files-directory` and must stay inside it, also after following symbolic links. |
+| `files-directory` | `""` | The directory `files` are read from; empty means `GITHUB_WORKSPACE`. |
 | `threshold` | `0.5` | A text whose score is at or above this is flagged. |
 | `mode` | `audit` | `audit` or `block`; see [below](#audit-block-and-dry-run). |
 | `dry-run` | `false` | Scan and set every output, but make no changes on GitHub. |
@@ -75,8 +77,8 @@ couldn't be scored, and empty when the step failed before it could screen anythi
 | `malicious-label` | `MALICIOUS` | The model's label whose score is compared with the threshold. It must be one of the labels in TEI's `/info`. |
 | `github-token` | `${{ github.token }}` | The token for escalation. |
 
-Every input reaches the script through the environment, never by interpolation into the script,
-so a text can't become code.
+Set `payload-fields`, `files`, or both. Every input reaches the script through the environment,
+never by interpolation into the script.
 
 ## Outputs
 
@@ -173,9 +175,7 @@ jobs:
     secrets:
       PROMPT_GUARD_CLIENT_ID: ${{ secrets.PROMPT_GUARD_CLIENT_ID }}
     with:
-      texts: >-
-        {"title": ${{ toJSON(github.event.pull_request.title) }},
-        "body": ${{ toJSON(github.event.pull_request.body) }}}
+      payload-fields: pull_request.title, pull_request.body
 ```
 
 It logs in to OpenBao with the job's OIDC token
@@ -214,12 +214,16 @@ action. They never reach a job output, the environment or a file.
   for the same reason.
 - **Fail closed.** Anything short of a complete, well-formed answer for every window is the
   verdict `error` and a failed step, in every mode, never `clean`.
-- **Trust the workflow, not the text.** The names in `texts`, `notify`, `label` and `marker` come
-  from the calling workflow and are validated; the texts are only ever sent to TEI.
+- **Never pass the text through `with` or `env`.** The runner prints every input and environment
+  variable of a step in the job log, before any script could mask it. A workflow that writes
+  untrusted text into `with:` or `env:`, for this action or any other, has already logged it. So
+  the action takes no text as an input: it reads the payload fields and files itself. Save other
+  text to a file from a script, not through an expression in `with`.
+- **Trust the workflow, not the text.** `payload-fields`, `files`, `notify`, `label` and `marker`
+  come from the calling workflow and are validated; the texts are only ever sent to TEI.
 
 Known limits: content that the tokenizer can't represent, e.g. unknown characters, reaches the
-model as unknown tokens. Inputs are passed through the environment, where Linux limits a single
-variable to 128 KiB, so `texts` must stay below that; a larger value fails the step.
+model as unknown tokens.
 
 ## Development
 

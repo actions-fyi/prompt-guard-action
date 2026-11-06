@@ -31,12 +31,26 @@ name: Prompt Guard
 on:
   workflow_call:
     inputs:
-      texts:
+      # The texts are never inputs: the runner prints a step's inputs in the log. They are read
+      # from the event payload, or from files in an artifact the caller uploaded in this run.
+      payload-fields:
         description: >-
-          A JSON object mapping a name to a text, e.g. {"title": "...", "body": "..."}. Empty and
-          null texts are skipped.
+          Dot paths into the event payload of the texts to screen, e.g. "pull_request.title,
+          pull_request.body". Each path is also the text's name.
         type: string
-        required: true
+        default: ""
+      artifact:
+        description: >-
+          The name of an artifact, uploaded by the caller earlier in the same run, that holds the
+          files to screen.
+        type: string
+        default: ""
+      files:
+        description: >-
+          The files in the artifact to screen, one name=path per line, e.g.
+          "comment=previous-comment.md".
+        type: string
+        default: ""
       threshold:
         description: The score, between 0 and 1, at or above which a text is flagged.
         type: string
@@ -155,6 +169,8 @@ jobs:
           HAS_SECRETS_ADDRESS: ${{ inputs.secrets-address != '' }}
           HAS_OPENBAO_ACCESS_ID: ${{ secrets.CF_ACCESS_CLIENT_ID != '' }}
           HAS_OPENBAO_ACCESS_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET != '' }}
+          HAS_ARTIFACT: ${{ inputs.artifact != '' }}
+          HAS_FILES: ${{ inputs.files != '' }}
         run: |
           failed=0
           if [[ "$HAS_ADDRESS" != true ]]; then
@@ -169,7 +185,23 @@ jobs:
             echo "::error::Only one of CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET is set. Set both to pass Cloudflare Access in front of OpenBao, or neither."
             failed=1
           fi
+          if [[ "$HAS_ARTIFACT" != "$HAS_FILES" ]]; then
+            echo "::error::Set artifact and files together: files names the files in the artifact to screen."
+            failed=1
+          fi
           exit "$failed"
+      # A fresh, empty directory, so nothing but the artifact's files can be read from it.
+      - name: Create Artifact Directory
+        id: artifact
+        if: inputs.artifact != ''
+        run: echo "path=$(mktemp -d "$RUNNER_TEMP/prompt-guard-artifact.XXXXXXXX")" >> "$GITHUB_OUTPUT"
+      # From this run, with the runtime token: no permission is needed.
+      - name: Download Artifact
+        if: inputs.artifact != ''
+        uses: actions/download-artifact@v8.0.2
+        with:
+          name: ${{ inputs.artifact }}
+          path: ${{ steps.artifact.outputs.path }}
       # exportEnv is off, so the values only exist as this step's outputs, which only the next
       # step reads. Empty header lines are dropped by vault-action.
       - name: Read Secrets
@@ -196,7 +228,9 @@ jobs:
           api-key: ${{ steps.secrets.outputs.api_key }}
           access-client-id: ${{ secrets.PROMPT_GUARD_CLIENT_ID }}
           access-client-secret: ${{ secrets.PROMPT_GUARD_CLIENT_ID && steps.secrets.outputs.access_secret || '' }}
-          texts: ${{ inputs.texts }}
+          payload-fields: ${{ inputs.payload-fields }}
+          files: ${{ inputs.files }}
+          files-directory: ${{ steps.artifact.outputs.path }}
           threshold: ${{ inputs.threshold }}
           mode: ${{ inputs.mode }}
           dry-run: ${{ inputs.dry-run }}
