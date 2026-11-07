@@ -1,0 +1,265 @@
+name: Prompt Guard
+# A reusable workflow around this repository's action, for the actions-fyi deployment: TEI at
+# promptguard.actions.fyi behind Cloudflare Access, and its secrets in OpenBao at
+# secrets.actions.fyi. Other repositories call it with
+# `uses: actions-fyi/prompt-guard-action/.github/workflows/_shared.yml@<ref>`, this repository with
+# `uses: $/.github/workflows/_shared.yml`. Other organisations copy this file and set their own
+# constants, or use the action directly.
+#
+# The _ prefix marks a shared workflow: called only with workflow_call, never by events or rulesets.
+#
+# OpenBao trusts this file, not its callers. Its JWT role is bound to the job_workflow_ref claim of
+# the OIDC token, which names this file at the ref it runs from: refs/heads/main,
+# refs/heads/gh-readonly-queue/main/* (the merge queue) or refs/tags/v*. So any repository can
+# call it, but only from those refs of this repository does it get the secrets, and the file must
+# keep this name and path. A pull request's copy runs from refs/pull/<n>/merge and gets nothing.
+#
+# Because OpenBao trusts this file with the secrets, the file alone decides where they go. The
+# addresses of TEI and OpenBao, the JWT audience, the auth method, path and role, and the secret
+# paths are constants in the job's env, not inputs: a caller that could set the TEI address would
+# receive the API key, and one that could set the OpenBao address and the audience would receive
+# an OIDC token the real role accepts. Configuration variables are no safer: in a called workflow,
+# vars resolve to the caller's repository. harden-runner blocks every other host, so a constant
+# changed in a pull request can't send the secrets elsewhere without also changing the allow
+# list next to it.
+#
+# The action runs with `uses: $/`, which resolves to this repository at the commit this workflow
+# runs at, wherever it was called from. `./` would resolve to the caller's checkout instead.
+#
+# The Cloudflare Access service token in front of TEI is split across two stores: its client ID
+# is the GitHub secret PROMPT_GUARD_CLIENT_ID, and its client secret lives in OpenBao. Neither
+# half alone passes Access. Without PROMPT_GUARD_CLIENT_ID, no Access secret is read and no Access
+# headers are sent, for a TEI reachable without Access, e.g. from internal runners. A separate
+# Access application may guard OpenBao itself; CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET
+# are its service token, sent to OpenBao only when both are set.
+#
+# These three secrets come from the caller, so they are untrusted input, and Check Configuration
+# validates them before anything uses them: letters, digits, ".", "_" and "-" only. vault-action
+# splits extraHeaders at newlines, so a CF_ACCESS_* value holding "x\nhost: evil.example" would add
+# a Host header. got uses that header for TLS SNI and certificate verification: the connection
+# still goes to the address of secrets.actions.fyi, which harden-runner allows, but the login
+# request, with the job's OIDC token, is addressed to, and verified against, a host the caller
+# chose. PROMPT_GUARD_CLIENT_ID becomes a header to TEI, so it is held to the same rule.
+#
+# Secrets go from OpenBao straight into the action's inputs: never into a job output, the
+# environment or a file. vault-action masks each value it reads.
+on:
+  workflow_call:
+    inputs:
+      # The texts are never inputs: the runner prints a step's inputs in the log. They are read
+      # from the event payload, or from files in an artifact the caller uploaded in this run.
+      payload-fields:
+        description: >-
+          Dot paths into the event payload of the texts to screen, e.g. "pull_request.title,
+          pull_request.body". Each path is also the text's name.
+        type: string
+        default: ""
+      artifact:
+        description: >-
+          The name of an artifact, uploaded by the caller earlier in the same run, that holds the
+          files to screen.
+        type: string
+        default: ""
+      files:
+        description: >-
+          The files in the artifact to screen, one name=path per line, e.g.
+          "comment=previous-comment.md".
+        type: string
+        default: ""
+      require-text:
+        description: >-
+          Whether finding nothing to screen is an error. false makes it a warning and the verdict
+          clean.
+        type: boolean
+        default: true
+      require-fields:
+        description: >-
+          Whether a payload-fields path that isn't in the event payload is an error, so a misspelled
+          path such as pull_request.bdy fails. false makes it a warning, for paths that only some
+          events carry.
+        type: boolean
+        default: true
+      threshold:
+        description: The score, between 0 and 1, at or above which a text is flagged.
+        type: string
+        default: "0.5"
+      mode:
+        description: "audit: flag and escalate without failing. block: also fail the job."
+        type: string
+        default: audit
+      dry-run:
+        description: Scan and set every output, but make no changes on GitHub.
+        type: boolean
+        default: false
+      notify:
+        description: Handles to mention when escalating, e.g. "@org/moderators".
+        type: string
+        default: ""
+      label:
+        description: The label for a flagged pull request or escalation issue. Empty adds none.
+        type: string
+        default: prompt-guard:flagged
+      marker:
+        description: The hidden HTML comment that identifies the escalation comment or issue.
+        type: string
+        default: <!-- prompt-guard -->
+    secrets:
+      PROMPT_GUARD_CLIENT_ID:
+        description: The client ID of the Cloudflare Access service token in front of TEI.
+        required: false
+      CF_ACCESS_CLIENT_ID:
+        description: The client ID of the Cloudflare Access service token in front of OpenBao.
+        required: false
+      CF_ACCESS_CLIENT_SECRET:
+        description: The client secret of the Cloudflare Access service token in front of OpenBao.
+        required: false
+    outputs:
+      verdict:
+        description: clean, flagged or error; empty if the job failed before screening.
+        value: ${{ jobs.guard.outputs.verdict }}
+      scores:
+        description: A JSON object mapping each screened name to its highest score.
+        value: ${{ jobs.guard.outputs.scores }}
+      flagged:
+        description: A JSON array of the flagged names.
+        value: ${{ jobs.guard.outputs.flagged }}
+      would-escalate:
+        description: true when a text was flagged.
+        value: ${{ jobs.guard.outputs.would-escalate }}
+      escalated:
+        description: true when the comment or the issue was posted.
+        value: ${{ jobs.guard.outputs.escalated }}
+
+permissions: {}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  guard:
+    name: Prompt Guard
+    runs-on: ubuntu-latest
+    # No contents: read: nothing reads the repository. The action is fetched with the job, and
+    # download-artifact reads this run's artifacts with the runtime token.
+    permissions:
+      id-token: write # Request the OIDC token that OpenBao's JWT role checks
+      pull-requests: write # Label a flagged pull request and convert it to a draft
+      issues: write # Comment on the pull request, or open and comment on the escalation issue
+    # The deployment, as constants; see the header. Change them together with allowed-endpoints.
+    env:
+      TEI_ADDRESS: https://promptguard.actions.fyi
+      OPENBAO_ADDRESS: https://secrets.actions.fyi
+      OPENBAO_JWT_AUDIENCE: https://secrets.actions.fyi
+      OPENBAO_METHOD: jwt
+      OPENBAO_PATH: github-actions
+      OPENBAO_ROLE: prompt-guard
+      OPENBAO_API_KEY_SECRET: ci/data/prompt-guard-api api_key
+      OPENBAO_ACCESS_SECRET: ci/data/prompt-guard-access client_secret
+    outputs:
+      verdict: ${{ steps.guard.outputs.verdict }}
+      scores: ${{ steps.guard.outputs.scores }}
+      flagged: ${{ steps.guard.outputs.flagged }}
+      would-escalate: ${{ steps.guard.outputs.would-escalate }}
+      escalated: ${{ steps.guard.outputs.escalated }}
+    steps:
+      # Blocks every host but these, so the secrets can only reach TEI and OpenBao. harden-runner
+      # v2.22.3 installs step-security/agent v0.18.0, whose addImplicitEndpoints (agent.go) also
+      # allows, without listing:
+      # - *.actions.githubusercontent.com: the OIDC token endpoint, and the results service that
+      #   download-artifact talks to;
+      # - actions-results-receiver-production.githubapp.com and
+      #   productionresultssa*.blob.core.windows.net: artifact storage;
+      # - codeload.github.com, and the Actions domains of GitHub's meta API;
+      # - agent.api.stepsecurity.io and prod.app-api.stepsecurity.io, while telemetry is on.
+      # v2.22.3 has no input to turn these off. The actions are fetched before this step runs.
+      - name: Harden the runner (Block all but TEI, OpenBao and the GitHub API)
+        uses: step-security/harden-runner@v2.22.3
+        with:
+          egress-policy: block
+          # Space-separated, so folded. api.github.com: the comment, label, draft (GraphQL) and
+          # issue of an escalation. promptguard.actions.fyi: TEI, TEI_ADDRESS.
+          # secrets.actions.fyi: OpenBao, OPENBAO_ADDRESS.
+          allowed-endpoints: >-
+            api.github.com:443
+            promptguard.actions.fyi:443
+            secrets.actions.fyi:443
+      # The caller's secrets are validated before vault-action or the action sees them; see the
+      # header. They reach the script through env, never interpolated into it, and as secrets they
+      # are masked in the log. Messages name a secret, never its value.
+      - name: Check Configuration
+        env:
+          PROMPT_GUARD_CLIENT_ID: ${{ secrets.PROMPT_GUARD_CLIENT_ID }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+          HAS_ARTIFACT: ${{ inputs.artifact != '' }}
+          HAS_FILES: ${{ inputs.files != '' }}
+        run: |
+          failed=0
+          for name in PROMPT_GUARD_CLIENT_ID CF_ACCESS_CLIENT_ID CF_ACCESS_CLIENT_SECRET; do
+            value="${!name}"
+            if [[ -n "$value" && ! "$value" =~ ^[A-Za-z0-9._-]+$ ]]; then
+              echo "::error::The secret $name may only hold letters, digits, '.', '_' and '-'."
+              failed=1
+            fi
+          done
+          if [[ -n "$CF_ACCESS_CLIENT_ID" && -z "$CF_ACCESS_CLIENT_SECRET" ]] \
+            || [[ -z "$CF_ACCESS_CLIENT_ID" && -n "$CF_ACCESS_CLIENT_SECRET" ]]; then
+            echo "::error::Only one of CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET is set. Set both to pass Cloudflare Access in front of OpenBao, or neither."
+            failed=1
+          fi
+          if [[ "$HAS_ARTIFACT" != "$HAS_FILES" ]]; then
+            echo "::error::Set artifact and files together: files names the files in the artifact to screen."
+            failed=1
+          fi
+          exit "$failed"
+      # A fresh, empty directory, so nothing but the artifact's files can be read from it.
+      - name: Create Artifact Directory
+        id: artifact
+        if: inputs.artifact != ''
+        run: echo "path=$(mktemp -d "$RUNNER_TEMP/prompt-guard-artifact.XXXXXXXX")" >> "$GITHUB_OUTPUT"
+      # From this run, with the runtime token: no permission is needed.
+      - name: Download Artifact
+        if: inputs.artifact != ''
+        uses: actions/download-artifact@v8.0.2
+        with:
+          name: ${{ inputs.artifact }}
+          path: ${{ steps.artifact.outputs.path }}
+      # exportEnv is off, so the values only exist as this step's outputs, which only the next
+      # step reads. Empty header lines are dropped by vault-action. The CF_ACCESS_* values were
+      # validated by Check Configuration, so neither can add a header line.
+      - name: Read Secrets
+        id: secrets
+        uses: hashicorp/vault-action@v4.0.0
+        with:
+          url: ${{ env.OPENBAO_ADDRESS }}
+          method: ${{ env.OPENBAO_METHOD }}
+          path: ${{ env.OPENBAO_PATH }}
+          role: ${{ env.OPENBAO_ROLE }}
+          jwtGithubAudience: ${{ env.OPENBAO_JWT_AUDIENCE }}
+          exportEnv: false
+          extraHeaders: |
+            ${{ secrets.CF_ACCESS_CLIENT_ID && secrets.CF_ACCESS_CLIENT_SECRET && format('CF-Access-Client-Id: {0}', secrets.CF_ACCESS_CLIENT_ID) || '' }}
+            ${{ secrets.CF_ACCESS_CLIENT_ID && secrets.CF_ACCESS_CLIENT_SECRET && format('CF-Access-Client-Secret: {0}', secrets.CF_ACCESS_CLIENT_SECRET) || '' }}
+          secrets: |
+            ${{ env.OPENBAO_API_KEY_SECRET }} | api_key ;
+            ${{ secrets.PROMPT_GUARD_CLIENT_ID && format('{0} | access_secret ;', env.OPENBAO_ACCESS_SECRET) || '' }}
+      - name: Screen Text
+        id: guard
+        uses: $/
+        with:
+          address: ${{ env.TEI_ADDRESS }}
+          api-key: ${{ steps.secrets.outputs.api_key }}
+          access-client-id: ${{ secrets.PROMPT_GUARD_CLIENT_ID }}
+          access-client-secret: ${{ secrets.PROMPT_GUARD_CLIENT_ID && steps.secrets.outputs.access_secret || '' }}
+          payload-fields: ${{ inputs.payload-fields }}
+          files: ${{ inputs.files }}
+          files-directory: ${{ steps.artifact.outputs.path }}
+          require-text: ${{ inputs.require-text }}
+          require-fields: ${{ inputs.require-fields }}
+          threshold: ${{ inputs.threshold }}
+          mode: ${{ inputs.mode }}
+          dry-run: ${{ inputs.dry-run }}
+          notify: ${{ inputs.notify }}
+          label: ${{ inputs.label }}
+          marker: ${{ inputs.marker }}

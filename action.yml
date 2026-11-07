@@ -1,0 +1,164 @@
+name: Prompt Guard
+description: >-
+  Screens untrusted text, such as a pull request's title and body, for prompt injection with Llama
+  Prompt Guard 2 served by text-embeddings-inference, before an agent reads it.
+author: actions-fyi
+branding:
+  icon: shield
+  color: red
+# A composite action with a single github-script step that loads plain CommonJS modules from
+# src/: no npm dependencies, no build and no dist/. github-script's require resolves an absolute
+# path as is (wrap-require.ts), and github.action_path, which only composite actions have, is
+# this action's own directory, wherever it was fetched to.
+#
+# Every input reaches the script through the step's env, never by interpolation into the script.
+# The texts are not inputs at all: the runner prints each step's inputs and env values in the log,
+# so the script reads the texts itself, from the event payload and from files. The API key and
+# the Access values are masked before any request is made.
+#
+# The verdict is clean only when every text was scored below the threshold. Anything else that
+# keeps a text from being scored gives the verdict error and fails the step, in every mode.
+#
+# Permissions the job needs for escalation (none for a dry run):
+#   contents: read, pull-requests: write, issues: write
+inputs:
+  address:
+    description: >-
+      The base URL of the TEI service, e.g. https://prompt-guard.example.com. It must be https
+      unless allow-insecure-address is true.
+    required: true
+  api-key:
+    description: TEI's API key, sent as Authorization Bearer. Empty sends no Authorization header.
+    required: false
+    default: ""
+  access-client-id:
+    description: >-
+      The Cloudflare Access service token's client ID, sent as CF-Access-Client-Id. Set it and
+      access-client-secret together, or neither when TEI has no Access gate in front of it.
+    required: false
+    default: ""
+  access-client-secret:
+    description: The Cloudflare Access service token's client secret, sent as CF-Access-Client-Secret.
+    required: false
+    default: ""
+  payload-fields:
+    description: >-
+      Dot paths into the event payload of the texts to screen, separated by newlines or commas,
+      e.g. "pull_request.title, pull_request.body". Each path is also the text's name. Empty and
+      null fields are skipped.
+    required: false
+    default: ""
+  files:
+    description: >-
+      Files to screen, one name=path per line, e.g. "comment=previous-comment.md", for text that
+      isn't in the payload. Paths are relative to files-directory and must stay inside it.
+    required: false
+    default: ""
+  files-directory:
+    description: The directory that files are read from. Empty means GITHUB_WORKSPACE.
+    required: false
+    default: ""
+  threshold:
+    description: The score, between 0 and 1, at or above which a text is flagged.
+    required: false
+    default: "0.5"
+  mode:
+    description: >-
+      audit: a flagged text sets the outputs and escalates, but doesn't fail the step. block: it
+      also fails the step.
+    required: false
+    default: audit
+  dry-run:
+    description: Scan and set every output, but make no changes on GitHub.
+    required: false
+    default: "false"
+  notify:
+    description: Handles to mention when escalating, e.g. "@org/moderators @octocat".
+    required: false
+    default: ""
+  label:
+    description: The label for a flagged pull request or escalation issue. Empty adds none.
+    required: false
+    default: prompt-guard:flagged
+  marker:
+    description: The hidden HTML comment that identifies this action's comment or issue.
+    required: false
+    default: <!-- prompt-guard -->
+  malicious-label:
+    description: The model's label whose score is checked against the threshold.
+    required: false
+    default: MALICIOUS
+  github-token:
+    description: The token for escalation.
+    required: false
+    default: ${{ github.token }}
+  require-text:
+    description: >-
+      Whether finding nothing to screen, every field and file empty or missing, is the verdict
+      error. false makes it a warning and the verdict clean.
+    required: false
+    default: "true"
+  require-fields:
+    description: >-
+      Whether a payload-fields path that isn't in the event payload is the verdict error, so a
+      misspelled path such as pull_request.bdy fails instead of being skipped while the run looks
+      clean. false makes it a warning, for paths that only some events carry.
+    required: false
+    default: "true"
+  allow-insecure-address:
+    description: Whether address may be plain http, which sends the credentials unencrypted.
+    required: false
+    default: "false"
+  bot-login:
+    description: >-
+      The login that github-token posts as, used to find this action's own comment and issue.
+      Set it when github-token is a personal access token or an app's token, e.g. my-app[bot].
+    required: false
+    default: github-actions[bot]
+outputs:
+  verdict:
+    description: >-
+      clean, flagged or error. Empty means the step failed before it could screen anything; treat
+      that as error.
+    value: ${{ steps.guard.outputs.verdict }}
+  scores:
+    description: A JSON object mapping each screened name to its highest score.
+    value: ${{ steps.guard.outputs.scores }}
+  flagged:
+    description: A JSON array of the flagged names.
+    value: ${{ steps.guard.outputs.flagged }}
+  would-escalate:
+    description: true when a text was flagged, so the action escalates unless it's a dry run.
+    value: ${{ steps.guard.outputs.would-escalate }}
+  escalated:
+    description: true when the comment or the issue was posted.
+    value: ${{ steps.guard.outputs.escalated }}
+runs:
+  using: composite
+  steps:
+    - name: Screen Text
+      id: guard
+      uses: actions/github-script@v9.0.0
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        PROMPT_GUARD_ADDRESS: ${{ inputs.address }}
+        PROMPT_GUARD_API_KEY: ${{ inputs.api-key }}
+        PROMPT_GUARD_ACCESS_CLIENT_ID: ${{ inputs.access-client-id }}
+        PROMPT_GUARD_ACCESS_CLIENT_SECRET: ${{ inputs.access-client-secret }}
+        PROMPT_GUARD_PAYLOAD_FIELDS: ${{ inputs.payload-fields }}
+        PROMPT_GUARD_FILES: ${{ inputs.files }}
+        PROMPT_GUARD_FILES_DIRECTORY: ${{ inputs.files-directory }}
+        PROMPT_GUARD_THRESHOLD: ${{ inputs.threshold }}
+        PROMPT_GUARD_MODE: ${{ inputs.mode }}
+        PROMPT_GUARD_DRY_RUN: ${{ inputs.dry-run }}
+        PROMPT_GUARD_NOTIFY: ${{ inputs.notify }}
+        PROMPT_GUARD_LABEL: ${{ inputs.label }}
+        PROMPT_GUARD_MARKER: ${{ inputs.marker }}
+        PROMPT_GUARD_MALICIOUS_LABEL: ${{ inputs.malicious-label }}
+        PROMPT_GUARD_BOT_LOGIN: ${{ inputs.bot-login }}
+        PROMPT_GUARD_REQUIRE_TEXT: ${{ inputs.require-text }}
+        PROMPT_GUARD_REQUIRE_FIELDS: ${{ inputs.require-fields }}
+        PROMPT_GUARD_ALLOW_INSECURE_ADDRESS: ${{ inputs.allow-insecure-address }}
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: return await require(process.env.ACTION_PATH + '/src/main.js')({ github, context, core })
