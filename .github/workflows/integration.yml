@@ -11,10 +11,11 @@ name: Test
 # Two of them are several thousand tokens of multilingual text, Latin with accents, CJK, Cyrillic
 # and emoji, so that the real tokenizer's byte offsets, the window cuts and the re-tokenizing
 # split all meet the live service. long-late holds an injection after roughly token 600, beyond
-# the first window; long-straddle holds one near the end of the first window, around token 500,
-# where the cut falls and only the 64-token overlap lets one window see it whole. The token
-# counts are estimates, about 50 tokens per filler paragraph. Each placement is a file of its own,
-# so that each must be flagged on its own.
+# the first window; long-near-cut holds one around token 500, near the first cut. The token
+# counts are estimates, about 50 tokens per filler paragraph, so long-near-cut may land in either
+# window or both: it checks multi-window scoring near the cut, not the overlap. The overlap is
+# tested in test/tei.test.js, with tokens placed exactly. Each placement is a file of its own, so
+# that each must be flagged on its own.
 #
 # OpenBao only hands out the secrets to _shared.yml running from refs/heads/main, the merge queue's
 # refs/heads/gh-readonly-queue/main/* or refs/tags/v* (see the binding in _shared.yml). So this
@@ -58,7 +59,7 @@ jobs:
             done
           }
           { filler 15; printf '%s ' "$injection"; filler 60; } > "$dir/long-late.txt"
-          { filler 10; printf '%s ' "$injection"; filler 60; } > "$dir/long-straddle.txt"
+          { filler 10; printf '%s ' "$injection"; filler 60; } > "$dir/long-near-cut.txt"
           wc -c "$dir"/*.txt
       - name: Upload Texts
         uses: actions/upload-artifact@v7.0.2
@@ -90,7 +91,7 @@ jobs:
         benign=benign.txt
         injection=injection.txt
         long-late=long-late.txt
-        long-straddle=long-straddle.txt
+        long-near-cut=long-near-cut.txt
 
   results:
     name: Integration Results
@@ -123,12 +124,12 @@ jobs:
           check "the verdict is flagged" "$([[ "$VERDICT" == flagged ]] && echo true)"
           check "the benign text scores below 0.5" \
             "$(jq -r '(.benign | type == "number") and .benign < 0.5' <<< "$SCORES" 2> /dev/null)"
-          for name in injection long-late long-straddle; do
+          for name in injection long-late long-near-cut; do
             check "$name scores at least 0.5" \
               "$(jq -r --arg n "$name" '(.[$n] | type == "number") and .[$n] >= 0.5' <<< "$SCORES" 2> /dev/null)"
           done
           check "exactly the three injections are flagged" \
-            "$(jq -r 'sort == ["injection", "long-late", "long-straddle"]' <<< "$FLAGGED" 2> /dev/null)"
+            "$(jq -r 'sort == ["injection", "long-late", "long-near-cut"]' <<< "$FLAGGED" 2> /dev/null)"
           # A dry run that flags must still report the escalation it would make, and make none.
           check "it would escalate" "$([[ "$WOULD_ESCALATE" == true ]] && echo true)"
           check "nothing was escalated, as it is a dry run" "$([[ "$ESCALATED" == false ]] && echo true)"
