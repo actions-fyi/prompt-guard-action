@@ -203,7 +203,7 @@ function parseInputs(env = process.env) {
     address: parseAddress(read(env, ENV.address), allowInsecureAddress),
     allowInsecureAddress,
     requireText: parseBoolean(read(env, ENV.requireText) || 'true', 'require-text'),
-    requireFields: parseBoolean(read(env, ENV.requireFields) || 'false', 'require-fields'),
+    requireFields: parseBoolean(read(env, ENV.requireFields) || 'true', 'require-fields'),
     apiKey: read(env, ENV.apiKey),
     accessClientId,
     accessClientSecret,

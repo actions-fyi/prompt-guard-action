@@ -39,8 +39,6 @@ jobs:
           address: https://prompt-guard.example.com
           api-key: ${{ secrets.PROMPT_GUARD_API_KEY }}
           payload-fields: pull_request.title, pull_request.body
-          # Both paths exist on every pull_request event, so a typo fails instead of passing.
-          require-fields: true
           notify: "@my-org/moderators"
 
   review:
@@ -79,7 +77,7 @@ screened.
 | `mode` | `audit` | `audit` or `block`; see [below](#audit-block-and-dry-run). |
 | `dry-run` | `false` | Scan and set every output, but make no changes on GitHub. |
 | `require-text` | `true` | Whether finding nothing to screen, every field and file empty or missing, is the verdict `error`. With `false` it's a warning, and the verdict `clean`. |
-| `require-fields` | `false` | Whether a `payload-fields` path that isn't in the event payload is the verdict `error`. **Turn it on wherever every path must exist**: otherwise a misspelled path, e.g. `pull_request.bdy`, is skipped with a warning, and the run can look clean although nothing was screened. Leave it off only for paths that some of the workflow's events don't carry. |
+| `require-fields` | `true` | Whether a `payload-fields` path that isn't in the event payload is the verdict `error`, so a misspelled path, e.g. `pull_request.bdy`, fails instead of being skipped while the run looks clean. Set it to `false` only for paths that some of the workflow's events don't carry: a missing path is then skipped with a warning. |
 | `allow-insecure-address` | `false` | Allow a plain `http` address, e.g. a TEI on the runner's own network. The API key and the Access values are then sent unencrypted, and the action warns about it. |
 | `notify` | `""` | Handles to mention when escalating, e.g. `@my-org/moderators @octocat`. |
 | `label` | `prompt-guard:flagged` | The label for a flagged pull request or the escalation issue. Empty adds none. At most 50 characters on one line, without commas (the issue lookup filters by it, and GitHub splits that filter at commas) or `` ` ``, `<` and `>`. |
@@ -127,7 +125,7 @@ scored. It fails closed:
 
 - an invalid input, or only one of the two Access values;
 - nothing to screen at all, unless `require-text` is `false`;
-- a `payload-fields` path missing from the payload, when `require-fields` is `true`;
+- a `payload-fields` path missing from the payload, unless `require-fields` is `false`;
 - a plain `http` address, unless `allow-insecure-address` is `true`;
 - TEI unreachable, or answering with any non-2xx status (429, 502, 503 and 504 are retried twice);
 - a 401 or 403: the API key or the Access token was refused;

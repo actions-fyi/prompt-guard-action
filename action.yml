@@ -100,12 +100,11 @@ inputs:
     default: "true"
   require-fields:
     description: >-
-      Whether a payload-fields path that isn't in the event payload is the verdict error. Turn it
-      on where every path must exist: otherwise a misspelled path such as pull_request.bdy is
-      skipped with a warning, and the run can look clean although nothing was screened. Leave it
-      off for paths that only some events carry.
+      Whether a payload-fields path that isn't in the event payload is the verdict error, so a
+      misspelled path such as pull_request.bdy fails instead of being skipped while the run looks
+      clean. false makes it a warning, for paths that only some events carry.
     required: false
-    default: "false"
+    default: "true"
   allow-insecure-address:
     description: Whether address may be plain http, which sends the credentials unencrypted.
     required: false

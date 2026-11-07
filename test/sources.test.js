@@ -95,7 +95,7 @@ test('main screens payload fields and files together, and writes neither text an
   }
 });
 
-test('a missing payload field is a warning, an escaping file is the verdict error', async () => {
+test('with require-fields false, a missing payload field is a warning; an escaping file is the verdict error', async () => {
   const { dir } = workspace();
   const run = async (extra) => {
     const core = mockCore();
@@ -105,7 +105,7 @@ test('a missing payload field is a warning, an escaping file is the verdict erro
     const verdict = await main({ github: mockGithub(), context, core, env: { ...env(), GITHUB_WORKSPACE: dir, ...extra }, fetch: tei.fetch, sleep: noSleep });
     return { verdict, core, tei };
   };
-  const missing = await run({ PROMPT_GUARD_PAYLOAD_FIELDS: 'pull_request.title, issue.body' });
+  const missing = await run({ PROMPT_GUARD_PAYLOAD_FIELDS: 'pull_request.title, issue.body', PROMPT_GUARD_REQUIRE_FIELDS: 'false' });
   assert.equal(missing.verdict, 'clean');
   assert.ok(missing.core.logs.includes('issue.body: not in the event payload, skipped.'));
 
@@ -150,5 +150,7 @@ test('require-fields through main: a misspelled field is the verdict error, not 
   assert.equal(strict.verdict, 'error');
   assert.equal(strict.tei.calls.length, 0);
   assert.match(strict.core.failed[0], /pull_request\.bdy/);
+  // Unset, as when the input isn't given: the default is strict.
+  assert.equal((await run(undefined)).verdict, 'error');
   assert.equal((await run('sometimes')).verdict, 'error');
 });

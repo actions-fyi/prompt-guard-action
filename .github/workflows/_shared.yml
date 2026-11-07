@@ -74,11 +74,11 @@ on:
         default: true
       require-fields:
         description: >-
-          Whether a payload-fields path that isn't in the event payload is an error. Turn it on
-          where every path must exist: otherwise a misspelled path such as pull_request.bdy is
-          only skipped with a warning.
+          Whether a payload-fields path that isn't in the event payload is an error, so a misspelled
+          path such as pull_request.bdy fails. false makes it a warning, for paths that only some
+          events carry.
         type: boolean
-        default: false
+        default: true
       threshold:
         description: The score, between 0 and 1, at or above which a text is flagged.
         type: string

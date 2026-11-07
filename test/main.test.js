@@ -51,6 +51,7 @@ test('nothing to screen is the verdict error by default, naming the fields', asy
   const { verdict, core, tei } = await run({
     texts: { body: '', title: null },
     PROMPT_GUARD_PAYLOAD_FIELDS: 'body, title, issue.body',
+    PROMPT_GUARD_REQUIRE_FIELDS: 'false',
   });
   assert.equal(verdict, 'error');
   assert.equal(tei.calls.length, 0);
