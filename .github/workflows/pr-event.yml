@@ -1,0 +1,23 @@
+name: PR Event
+# Exists so workflow_run listeners can run with secrets for fork pull requests too.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions: {}
+
+jobs:
+  record:
+    name: Record
+    runs-on: ubuntu-latest
+    concurrency:
+      group: pr-event-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@v2.22.4
+        with:
+          egress-policy: audit
+
+      - name: Record Event
+        run: echo "::notice::Pull request event recorded for workflow_run listeners"

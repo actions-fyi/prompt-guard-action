@@ -1,0 +1,17 @@
+name: Validate
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: ["**"]
+
+permissions: {}
+
+jobs:
+  renovate:
+    name: Renovate
+    # The union of what the jobs of _renovate.yml declare; a called job can't get more.
+    permissions:
+      contents: read # Read the Renovate configs
+      pull-requests: write # Review permission, and post the suggestions on pull requests
+    uses: actions-fyi/shared-workflows/.github/workflows/_renovate.yml@3846a95a41212282762d6d8769d7f6efe3c7078c # v0.9.0
