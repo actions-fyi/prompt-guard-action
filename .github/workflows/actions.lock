@@ -8,13 +8,23 @@ workflows:
         - 'actions/github-script@v9.0.0'
         - 'hashicorp/vault-action@v4.0.0'
         - 'step-security/harden-runner@v2.22.3'
+    '.github/workflows/actions-lock-explain.yml': []
+    '.github/workflows/actions-lock-push.yml': []
+    '.github/workflows/auto-label.yml': []
+    '.github/workflows/claude.yml': []
     '.github/workflows/integration.yml':
         - 'actions/upload-artifact@v7.0.2'
         - 'step-security/harden-runner@v2.22.3'
+    '.github/workflows/label-sync.yml': []
+    '.github/workflows/pr-event.yml':
+        - 'step-security/harden-runner@v2.22.4'
+    '.github/workflows/pr-metadata.yml': []
+    '.github/workflows/renovate.yml': []
     '.github/workflows/test.yml':
         - 'actions/checkout@v7.0.1'
         - 'actions/setup-node@v7.1.0'
         - 'step-security/harden-runner@v2.22.3'
+    '.github/workflows/zizmor.yml': []
 dependencies:
     'actions/checkout@v7.0.1':
         ref: 'v7.0.1'
@@ -49,5 +59,10 @@ dependencies:
     'step-security/harden-runner@v2.22.3':
         ref: 'v2.22.3'
         commit: 'sha1-46b06cea07f9e64621fdf066ba77ac6915163d43'
+        owner_id: 88700172
+        repo_id: 422287306
+    'step-security/harden-runner@v2.22.4':
+        ref: 'v2.22.4'
+        commit: 'sha1-1d88384fd173af6ecb012dfd0264a306b711241a'
         owner_id: 88700172
         repo_id: 422287306
