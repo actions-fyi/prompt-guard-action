@@ -12,6 +12,7 @@ workflows:
     '.github/workflows/actions-lock-push.yml': []
     '.github/workflows/auto-label.yml': []
     '.github/workflows/claude.yml': []
+    '.github/workflows/codeql.yml': []
     '.github/workflows/integration.yml':
         - 'actions/upload-artifact@v7.0.2'
         - 'step-security/harden-runner@v2.22.3'
