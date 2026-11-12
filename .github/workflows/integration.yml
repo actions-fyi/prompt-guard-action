@@ -30,6 +30,13 @@ on:
 
 permissions: {}
 
+# One run per ref, so the live service sees one at a time: a new push to main cancels the run of
+# the push before, and each merge group has a ref of its own. The group is keyed on
+# github.workflow_ref, not github.workflow, because test.yml is also named Test.
+concurrency:
+  group: ${{ github.workflow_ref }}
+  cancel-in-progress: true
+
 defaults:
   run:
     shell: bash
@@ -80,9 +87,12 @@ jobs:
       pull-requests: write # Required by _shared.yml; unused in a dry run
       issues: write # Required by _shared.yml; unused in a dry run
     uses: $/.github/workflows/_shared.yml
-    # PROMPT_GUARD_CLIENT_ID, and CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET if OpenBao is
-    # behind Access too.
-    secrets: inherit
+    # Only the secrets _shared.yml declares. CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET are
+    # only needed if OpenBao is behind Access too; an unset secret passes as empty.
+    secrets:
+      PROMPT_GUARD_CLIENT_ID: ${{ secrets.PROMPT_GUARD_CLIENT_ID }}
+      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
     with:
       dry-run: true
       mode: audit

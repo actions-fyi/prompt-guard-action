@@ -55,8 +55,20 @@ const HANDLE = /^@?([A-Za-z0-9](?:[A-Za-z0-9-]{0,38})(?:\/[A-Za-z0-9][A-Za-z0-9_
 const LABEL = /^[^\r\n`<>]{1,50}$/;
 // A user or app login, e.g. github-actions[bot] or my-app[bot].
 const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})(?:\[bot\])?$/;
-// The marker must stay an invisible HTML comment, on one line.
-const MARKER = /^<!--[^\r\n]*-->$/;
+// The marker must stay one invisible HTML comment, on one line. Its text has no < or >, so it
+// can neither end the comment early (with --> or --!>, or as <!--> and <!--->) nor open a tag.
+const MARKER_OPEN = '<!--';
+const MARKER_CLOSE = '-->';
+const MARKER_FORBIDDEN = /[\r\n<>]/;
+function isMarker(value) {
+  return (
+    value.length <= 200 &&
+    value.startsWith(MARKER_OPEN) &&
+    value.endsWith(MARKER_CLOSE) &&
+    value.length >= MARKER_OPEN.length + MARKER_CLOSE.length &&
+    !MARKER_FORBIDDEN.test(value.slice(MARKER_OPEN.length, -MARKER_CLOSE.length))
+  );
+}
 
 function read(env, key) {
   return (env[key] ?? '').trim();
@@ -189,7 +201,9 @@ function parseInputs(env = process.env) {
   if (label.includes(',')) throw new ConfigError('label must not contain a comma.');
 
   const marker = read(env, ENV.marker) || '<!-- prompt-guard -->';
-  if (!MARKER.test(marker)) throw new ConfigError('marker must be a one-line HTML comment, e.g. <!-- prompt-guard -->.');
+  if (!isMarker(marker)) {
+    throw new ConfigError('marker must be a one-line HTML comment without < or > inside, e.g. <!-- prompt-guard -->.');
+  }
 
   const maliciousLabel = read(env, ENV.maliciousLabel) || 'MALICIOUS';
   if (!LABEL.test(maliciousLabel)) throw new ConfigError('malicious-label must be a short single line.');
