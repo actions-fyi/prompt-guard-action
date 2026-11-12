@@ -174,7 +174,7 @@ jobs:
       # - agent.api.stepsecurity.io and prod.app-api.stepsecurity.io, while telemetry is on.
       # v2.22.3 has no input to turn these off. The actions are fetched before this step runs.
       - name: Harden the runner (Block all but TEI, OpenBao and the GitHub API)
-        uses: step-security/harden-runner@v2.22.3
+        uses: step-security/harden-runner@v2.22.4
         with:
           egress-policy: block
           # Space-separated, so folded. api.github.com: the comment, label, draft (GraphQL) and
