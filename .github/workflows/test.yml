@@ -10,6 +10,12 @@ on:
 
 permissions: {}
 
+# One run per pull request or merge group: a new push cancels the run of the one before. The group
+# is keyed on github.workflow_ref, not github.workflow, because integration.yml is also named Test.
+concurrency:
+  group: ${{ github.workflow_ref }}
+  cancel-in-progress: true
+
 defaults:
   run:
     shell: bash
