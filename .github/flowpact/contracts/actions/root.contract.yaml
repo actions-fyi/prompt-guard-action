@@ -34,6 +34,10 @@ interface:
       required: false
       default: 'false'
       description: Scan and set every output, but make no changes on GitHub.
+    escalate-on-error:
+      required: false
+      default: 'false'
+      description: Whether a run in which TEI couldn't score the texts escalates too, with a comment or the issue but no label or draft, so that keeping TEI from answering doesn't keep people from hearing about it. A configuration error never escalates.
     files:
       required: false
       default: ''
@@ -96,7 +100,7 @@ interface:
       description: clean, flagged or error. Empty means the step failed before it could screen anything; treat that as error.
       value: ${{ steps.guard.outputs.verdict }}
     would-escalate:
-      description: true when a text was flagged, so the action escalates unless it's a dry run.
+      description: true when a text was flagged, or with escalate-on-error when TEI couldn't score them, so the action escalates unless it's a dry run.
       value: ${{ steps.guard.outputs.would-escalate }}
 consumers:
   - from: .github/workflows/_shared.yml
@@ -108,6 +112,7 @@ consumers:
       - address
       - api-key
       - dry-run
+      - escalate-on-error
       - files
       - files-directory
       - label

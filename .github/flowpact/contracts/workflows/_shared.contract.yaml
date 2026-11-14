@@ -19,6 +19,11 @@ interface:
       required: false
       default: false
       description: Scan and set every output, but make no changes on GitHub.
+    escalate-on-error:
+      type: boolean
+      required: false
+      default: false
+      description: Whether a run in which TEI couldn't score the texts escalates too, with a comment or the issue but no label or draft.
     files:
       type: string
       required: false
@@ -85,7 +90,7 @@ interface:
       description: clean, flagged or error; empty if the job failed before screening.
       value: ${{ jobs.guard.outputs.verdict }}
     would-escalate:
-      description: true when a text was flagged.
+      description: true when a text was flagged, or with escalate-on-error when TEI couldn't score them.
       value: ${{ jobs.guard.outputs.would-escalate }}
 uses:
   - job: guard
@@ -97,6 +102,7 @@ uses:
       address: ${{ env.TEI_ADDRESS }}
       api-key: ${{ steps.secrets.outputs.api_key }}
       dry-run: ${{ inputs.dry-run }}
+      escalate-on-error: ${{ inputs.escalate-on-error }}
       files: ${{ inputs.files }}
       files-directory: ${{ steps.artifact.outputs.path }}
       label: ${{ inputs.label }}
