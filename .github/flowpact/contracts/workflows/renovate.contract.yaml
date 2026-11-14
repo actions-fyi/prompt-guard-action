@@ -13,5 +13,5 @@ interface:
   outputs: {}
 calls:
   - job: renovate
-    uses: actions-fyi/shared-workflows/.github/workflows/_renovate.yml@62f4556f15dbf623e76ceeacef49b957fbc76384
+    uses: actions-fyi/shared-workflows/.github/workflows/_renovate.yml@v0.18.1
 consumers: []
