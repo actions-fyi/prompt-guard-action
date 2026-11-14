@@ -16,6 +16,13 @@ const { formatScore } = require('./verdict');
 // convert a pull request to a draft. They are tried first, so that the comment says what actually
 // happened.
 //
+// With escalate-on-error, a run in which TEI couldn't score the texts escalates too, so that an
+// attacker who keeps TEI from answering, by an outage or by text built to time it out, still gets
+// a person to look. That comment adds no label and no draft, since nothing was flagged, and it
+// minimizes only a previous error comment, never a flag: a forced error must not hide a flag.
+// It doesn't say why scoring failed, which would tell the author of the text what worked; the
+// run's log does.
+//
 // Nothing written here quotes or describes the flagged text. A comment that repeated it would put
 // the injection in front of every agent that reads the thread. Only the names of the texts, their
 // scores, the threshold, the run and the commit are written.
@@ -92,6 +99,33 @@ function buildBody({ context, inputs, scores, flagged, subject, actions, sha = '
       'Every run flags the texts again while they score at or above the threshold; removing the label ' +
       (subject === 'this pull request' ? 'or marking the pull request ready ' : 'or closing this issue ') +
       "doesn't change that. Changing the text does.",
+  );
+  return lines.join('\n');
+}
+
+const ERROR_HEADING = '### Prompt Guard could not screen';
+
+// The body of an error comment or issue. It names the texts but gives no reason: see the header.
+function buildErrorBody({ context, inputs, names, subject, sha = '' }) {
+  const lines = [inputs.marker, '', `${ERROR_HEADING} ${subject}`, ''];
+  if (inputs.notify.length > 0) lines.push(`${inputs.notify.join(' ')}: please review.`, '');
+  lines.push(
+    `Prompt Guard couldn't score ${names.length === 1 ? 'this text' : `these ${names.length} texts`}, so none of them counts as screened. ` +
+      'The texts are not quoted here. Treat them as unsafe: read them where they were written, as text, before any agent or automation acts on them.',
+    '',
+    '| Text |',
+    '| --- |',
+    ...names.map((name) => `| \`${name}\` |`),
+    '',
+  );
+  const source = sourceUrl(context);
+  lines.push(
+    [source ? `[Source](${source})` : '', sha ? `Commit \`${sha}\`` : '', `[Workflow run](${runUrl(context)})`]
+      .filter(Boolean)
+      .join(' · '),
+    '',
+    'The run failed because the Prompt Guard service was unreachable or gave an answer it could not use; the log says which. ' +
+      'That can be an outage, or text built to make scoring fail. Rerunning the workflow screens the texts again.',
   );
   return lines.join('\n');
 }
@@ -181,7 +215,11 @@ async function escalatePullRequest({ github, context, core, inputs, scores, flag
     actions: notes,
     sha: commitSha(context, pull),
   });
+  await postPullRequestComment({ github, core, inputs, repo, number, body, minimizes: () => true });
+}
 
+// Posts a new comment and minimizes the action's previous one, if minimizes accepts it.
+async function postPullRequestComment({ github, core, inputs, repo, number, body, minimizes }) {
   // The previous comment is looked up first, so that the new one is never mistaken for it.
   let previous;
   try {
@@ -197,7 +235,7 @@ async function escalatePullRequest({ github, context, core, inputs, scores, flag
     throw new EscalationError(`Prompt Guard could not post the comment on pull request #${number} (${describe(error)}).`);
   }
 
-  if (previous?.node_id) {
+  if (previous?.node_id && minimizes(previous)) {
     try {
       await github.graphql(MINIMIZE_MUTATION, { id: previous.node_id });
     } catch (error) {
@@ -207,10 +245,13 @@ async function escalatePullRequest({ github, context, core, inputs, scores, flag
 }
 
 async function escalateIssue({ github, context, core, inputs, scores, flagged }) {
-  const repo = context.repo;
   const subject = `untrusted text in a ${context.eventName} run`;
   const body = buildBody({ context, inputs, scores, flagged, subject, actions: [], sha: commitSha(context) });
+  await postIssue({ github, core, inputs, repo: context.repo, title: 'Prompt Guard flagged untrusted text', body });
+}
 
+// Comments on the action's open issue, or opens one. A flag and an error share the issue.
+async function postIssue({ github, core, inputs, repo, title, body }) {
   if (inputs.label) {
     try {
       await ensureLabel(github, repo, inputs.label);
@@ -248,7 +289,7 @@ async function escalateIssue({ github, context, core, inputs, scores, flagged })
     issue = (
       await github.rest.issues.create({
         ...repo,
-        title: 'Prompt Guard flagged untrusted text',
+        title,
         body,
         ...(inputs.label ? { labels: [inputs.label] } : {}),
       })
@@ -275,4 +316,19 @@ async function escalate({ github, context, core, inputs, scores, flagged }) {
   else await escalateIssue({ github, context, core, inputs, scores, flagged });
 }
 
-module.exports = { EscalationError, buildBody, commitSha, escalate, pullRequestNumber, sourceUrl };
+// Throws an EscalationError when the comment or the issue could not be posted. names are the
+// texts that couldn't be scored.
+async function escalateError({ github, context, core, inputs, names }) {
+  const number = pullRequestNumber(context.payload);
+  const sha = commitSha(context);
+  if (number) {
+    const body = buildErrorBody({ context, inputs, names, subject: 'this pull request', sha });
+    const minimizes = (previous) => previous.body.includes(`\n${ERROR_HEADING} `);
+    await postPullRequestComment({ github, core, inputs, repo: context.repo, number, body, minimizes });
+  } else {
+    const body = buildErrorBody({ context, inputs, names, subject: `untrusted text in a ${context.eventName} run`, sha });
+    await postIssue({ github, core, inputs, repo: context.repo, title: 'Prompt Guard could not screen untrusted text', body });
+  }
+}
+
+module.exports = { EscalationError, buildBody, buildErrorBody, commitSha, escalate, escalateError, pullRequestNumber, sourceUrl };

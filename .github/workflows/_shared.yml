@@ -91,6 +91,12 @@ on:
         description: Scan and set every output, but make no changes on GitHub.
         type: boolean
         default: false
+      escalate-on-error:
+        description: >-
+          Whether a run in which TEI couldn't score the texts escalates too, with a comment or the
+          issue but no label or draft.
+        type: boolean
+        default: false
       notify:
         description: Handles to mention when escalating, e.g. "@org/moderators".
         type: string
@@ -124,7 +130,7 @@ on:
         description: A JSON array of the flagged names.
         value: ${{ jobs.guard.outputs.flagged }}
       would-escalate:
-        description: true when a text was flagged.
+        description: true when a text was flagged, or with escalate-on-error when TEI couldn't score them.
         value: ${{ jobs.guard.outputs.would-escalate }}
       escalated:
         description: true when the comment or the issue was posted.
@@ -260,6 +266,7 @@ jobs:
           threshold: ${{ inputs.threshold }}
           mode: ${{ inputs.mode }}
           dry-run: ${{ inputs.dry-run }}
+          escalate-on-error: ${{ inputs.escalate-on-error }}
           notify: ${{ inputs.notify }}
           label: ${{ inputs.label }}
           marker: ${{ inputs.marker }}
