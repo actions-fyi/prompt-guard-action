@@ -22,8 +22,8 @@ interface:
     escalate-on-error:
       type: boolean
       required: false
-      default: false
-      description: Whether a run in which TEI couldn't score the texts escalates too, with a comment or the issue but no label or draft.
+      default: true
+      description: Whether a run in which TEI couldn't score the texts escalates too, with a comment or the issue but no label or draft. On by default, unlike the action's input.
     files:
       type: string
       required: false

@@ -256,6 +256,9 @@ jobs:
       payload-fields: pull_request.title, pull_request.body
 ```
 
+Unlike the action, it sets `escalate-on-error` to `true` by default, so a TEI error reaches
+`notify` like a flag does; pass `escalate-on-error: false` to turn that off.
+
 Text that isn't in the payload goes in an artifact: upload it earlier in the same run and pass
 `artifact` with its name and `files` with `name=path` pairs inside it. The workflow downloads it
 into a fresh, empty directory and screens those files.
