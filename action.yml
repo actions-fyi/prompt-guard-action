@@ -18,6 +18,7 @@ branding:
 #
 # The verdict is clean only when every text was scored below the threshold. Anything else that
 # keeps a text from being scored gives the verdict error and fails the step, in every mode.
+# With escalate-on-error, a TEI error escalates too.
 #
 # Permissions the job needs for escalation (none for a dry run):
 #   contents: read, pull-requests: write, issues: write
@@ -70,6 +71,13 @@ inputs:
     default: audit
   dry-run:
     description: Scan and set every output, but make no changes on GitHub.
+    required: false
+    default: "false"
+  escalate-on-error:
+    description: >-
+      Whether a run in which TEI couldn't score the texts escalates too, with a comment or the
+      issue but no label or draft, so that keeping TEI from answering doesn't keep people from
+      hearing about it. A configuration error never escalates.
     required: false
     default: "false"
   notify:
@@ -128,7 +136,9 @@ outputs:
     description: A JSON array of the flagged names.
     value: ${{ steps.guard.outputs.flagged }}
   would-escalate:
-    description: true when a text was flagged, so the action escalates unless it's a dry run.
+    description: >-
+      true when a text was flagged, or with escalate-on-error when TEI couldn't score them, so the
+      action escalates unless it's a dry run.
     value: ${{ steps.guard.outputs.would-escalate }}
   escalated:
     description: true when the comment or the issue was posted.
@@ -151,6 +161,7 @@ runs:
         PROMPT_GUARD_THRESHOLD: ${{ inputs.threshold }}
         PROMPT_GUARD_MODE: ${{ inputs.mode }}
         PROMPT_GUARD_DRY_RUN: ${{ inputs.dry-run }}
+        PROMPT_GUARD_ESCALATE_ON_ERROR: ${{ inputs.escalate-on-error }}
         PROMPT_GUARD_NOTIFY: ${{ inputs.notify }}
         PROMPT_GUARD_LABEL: ${{ inputs.label }}
         PROMPT_GUARD_MARKER: ${{ inputs.marker }}

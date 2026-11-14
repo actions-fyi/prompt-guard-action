@@ -4,13 +4,15 @@
 //
 // The verdict is clean only when every text was scored and none reached the threshold. Anything
 // that keeps a text from being scored, a configuration error or a TEI response this action
-// doesn't understand, gives the verdict error and fails the step, in every mode.
+// doesn't understand, gives the verdict error and fails the step, in every mode. With
+// escalate-on-error, a TEI error also escalates: it is the error the author of a text can cause.
+// A configuration error is the workflow's, and the failed step is enough.
 
 const { ConfigError, SECRET_ENV, parseInputs } = require('./inputs');
 const { collectTexts } = require('./sources');
 const { TeiError, createClient, parseInfo, scoreText } = require('./tei');
 const { decide, formatScore } = require('./verdict');
-const { EscalationError, escalate } = require('./escalate');
+const { EscalationError, escalate, escalateError } = require('./escalate');
 
 function setOutputs(core, outputs) {
   core.setOutput('verdict', outputs.verdict);
@@ -38,12 +40,15 @@ module.exports = async function main({ github, context, core, env = process.env,
 
   const outputs = { verdict: 'error', scores: {}, flagged: [], wouldEscalate: false, escalated: false };
   let inputs;
+  let texts = [];
   try {
     inputs = parseInputs(env);
     if (inputs.address.startsWith('http:')) {
       core.warning('address is plain http, so the API key and the Access values are sent unencrypted.');
     }
-    const { texts, empty, missing } = collectTexts(inputs, context.payload);
+    const collected = collectTexts(inputs, context.payload);
+    texts = collected.texts;
+    const { empty, missing } = collected;
     for (const name of empty) core.info(`${name}: empty, skipped.`);
     for (const name of missing) core.warning(`${name}: not in the event payload, skipped.`);
     if (texts.length === 0) {
@@ -67,8 +72,23 @@ module.exports = async function main({ github, context, core, env = process.env,
     }
   } catch (error) {
     outputs.scores = {};
+    let escalationError;
+    if (error instanceof TeiError && inputs?.escalateOnError) {
+      outputs.wouldEscalate = true;
+      if (inputs.dryRun) {
+        core.notice('Dry run: Prompt Guard would escalate the error, but makes no changes on GitHub.');
+      } else {
+        try {
+          await escalateError({ github, context, core, inputs, names: texts.map((t) => t.name) });
+          outputs.escalated = true;
+        } catch (escalation) {
+          escalationError = escalation;
+        }
+      }
+    }
     setOutputs(core, outputs);
     core.setFailed(`Prompt Guard could not screen the texts, so they must be treated as unsafe. ${explain(error)}`);
+    if (escalationError) core.setFailed(explain(escalationError));
     return outputs.verdict;
   }
 

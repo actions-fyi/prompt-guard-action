@@ -530,6 +530,100 @@ for (const [name, answer, message] of failures) {
   }
 }
 
+// A TEI that answers every request with a 503.
+const down = () => mockTei({ override: () => new Response('overloaded', { status: 503 }) });
+const ERROR_ON = { PROMPT_GUARD_ESCALATE_ON_ERROR: 'true' };
+
+test('with escalate-on-error, a TEI error comments on the pull request, without a label or a draft', async () => {
+  const { verdict, core, github } = await run({
+    texts: { title: 'Update docs', body: INJECTION },
+    tei: down(),
+    PROMPT_GUARD_NOTIFY: '@octo-org/moderators',
+    ...ERROR_ON,
+  });
+  assert.equal(verdict, 'error');
+  assert.equal(core.outputs.verdict, 'error');
+  assert.equal(core.outputs.scores, '{}');
+  assert.equal(core.outputs['would-escalate'], 'true');
+  assert.equal(core.outputs.escalated, 'true');
+  // The step still fails, with the reason in the log.
+  assert.equal(core.failed.length, 1);
+  assert.match(core.failed[0], /failed \(HTTP 503\)/);
+
+  assert.deepEqual(github.calls.map((c) => c.name), ['issues.listComments', 'issues.createComment']);
+  const { body, issue_number } = github.calls.find((c) => c.name === 'issues.createComment').params;
+  assert.equal(issue_number, 7);
+  assert.ok(body.startsWith('<!-- prompt-guard -->\n\n### Prompt Guard could not screen this pull request\n'));
+  assert.match(body, /@octo-org\/moderators: please review/);
+  assert.match(body, /\| `title` \|\n\| `body` \|/);
+  assert.match(body, /Commit `0123456`/);
+  assert.match(body, /https:\/\/github\.com\/octo-org\/octo-repo\/actions\/runs\/4242/);
+  // The reason stays in the log: the comment would tell the author of the text what worked.
+  for (const reason of ['503', 'HTTP', '/info', 'Access']) assert.ok(!body.includes(reason), `"${reason}" was posted`);
+  for (const fragment of [TRIGGER, 'secret-canary-7f3a', 'Update docs']) assert.ok(!body.includes(fragment), `"${fragment}" was posted`);
+});
+
+test('with escalate-on-error, a configuration error still escalates nothing', async () => {
+  const { verdict, core, github } = await run({ texts: { body: 'hi' }, PROMPT_GUARD_THRESHOLD: '2', ...ERROR_ON });
+  assert.equal(verdict, 'error');
+  assert.equal(core.outputs['would-escalate'], 'false');
+  assert.deepEqual(github.calls, []);
+});
+
+test('with escalate-on-error, a dry run reports the escalation and makes no Octokit call', async () => {
+  const { github, used } = forbiddenGithub();
+  const { core } = await run({ texts: { body: 'hi' }, tei: down(), github, PROMPT_GUARD_DRY_RUN: 'true', ...ERROR_ON });
+  assert.deepEqual(used, []);
+  assert.equal(core.outputs['would-escalate'], 'true');
+  assert.equal(core.outputs.escalated, 'false');
+  assert.equal(core.failed.length, 1);
+});
+
+test('an error comment minimizes a previous error comment, but never a flag', async () => {
+  const flag = { id: 1, node_id: 'IC_flag', user: BOT, body: '<!-- prompt-guard -->\n\n### Prompt Guard flagged this pull request\n' };
+  const error = { id: 2, node_id: 'IC_error', user: BOT, body: '<!-- prompt-guard -->\n\n### Prompt Guard could not screen this pull request\n' };
+  const afterError = mockGithub({ comments: [flag, error] });
+  await run({ texts: { body: 'hi' }, tei: down(), github: afterError, ...ERROR_ON });
+  assert.deepEqual(minimized(afterError), ['IC_error']);
+
+  const afterFlag = mockGithub({ comments: [error, flag] });
+  const { core } = await run({ texts: { body: 'hi' }, tei: down(), github: afterFlag, ...ERROR_ON });
+  assert.equal(core.outputs.escalated, 'true');
+  assert.deepEqual(minimized(afterFlag), []);
+
+  // A flag after an error minimizes it, as it does any previous comment.
+  const flagged = mockGithub({ comments: [error] });
+  await run({ texts: { body: INJECTION }, github: flagged, ...ERROR_ON });
+  assert.deepEqual(minimized(flagged), ['IC_error']);
+});
+
+test('with escalate-on-error, other events open the labeled issue, or comment on the open one', async () => {
+  const context = prContext({ eventName: 'schedule', payload: {} });
+  const fresh = mockGithub();
+  const first = await run({ texts: { input: 'hi' }, tei: down(), github: fresh, context, ...ERROR_ON });
+  assert.equal(first.core.outputs.escalated, 'true');
+  const created = fresh.calls.find((c) => c.name === 'issues.create').params;
+  assert.equal(created.title, 'Prompt Guard could not screen untrusted text');
+  assert.deepEqual(created.labels, ['prompt-guard:flagged']);
+  assert.match(created.body, /could not screen untrusted text in a schedule run/);
+
+  const open = mockGithub({ issues: [{ number: 12, user: BOT, body: '<!-- prompt-guard -->\n...' }] });
+  await run({ texts: { input: 'hi' }, tei: down(), github: open, context, ...ERROR_ON });
+  assert.ok(!open.calls.some((c) => c.name === 'issues.create'));
+  assert.equal(open.calls.find((c) => c.name === 'issues.createComment').params.issue_number, 12);
+});
+
+test('an error escalation that cannot be posted fails the step a second time', async () => {
+  const github = mockGithub({ fail: ['issues.createComment'] });
+  const { verdict, core } = await run({ texts: { body: 'hi' }, tei: down(), github, ...ERROR_ON });
+  assert.equal(verdict, 'error');
+  assert.equal(core.outputs.escalated, 'false');
+  assert.equal(core.outputs['would-escalate'], 'true');
+  assert.equal(core.failed.length, 2);
+  assert.match(core.failed[0], /failed \(HTTP 503\)/);
+  assert.match(core.failed[1], /could not post the comment on pull request #7 \(HTTP 403/);
+});
+
 test('5xx answers that may pass are retried, others are not', async () => {
   let infos = 0;
   const flaky = mockTei({ override: (path) => (path === '/info' && ++infos < 3 ? new Response('', { status: 503 }) : undefined) });
@@ -657,6 +751,7 @@ test('inputs are parsed with their defaults', () => {
   assert.equal(inputs.threshold, 0.5);
   assert.equal(inputs.mode, 'audit');
   assert.equal(inputs.dryRun, false);
+  assert.equal(inputs.escalateOnError, false);
   assert.deepEqual(inputs.notify, ['@a', '@b', '@org/team-x']);
   assert.equal(inputs.marker, '<!-- prompt-guard -->');
   assert.equal(inputs.maliciousLabel, 'MALICIOUS');

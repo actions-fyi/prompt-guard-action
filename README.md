@@ -76,6 +76,7 @@ screened.
 | `threshold` | `0.5` | A text whose score is at or above this is flagged. |
 | `mode` | `audit` | `audit` or `block`; see [below](#audit-block-and-dry-run). |
 | `dry-run` | `false` | Scan and set every output, but make no changes on GitHub. |
+| `escalate-on-error` | `false` | Whether a run in which TEI couldn't score the texts escalates too; see [Escalation](#escalation). A configuration error never escalates. |
 | `require-text` | `true` | Whether finding nothing to screen, every field and file empty or missing, is the verdict `error`. With `false` it's a warning, and the verdict `clean`. |
 | `require-fields` | `true` | Whether a `payload-fields` path that isn't in the event payload is the verdict `error`, so a misspelled path, e.g. `pull_request.bdy`, fails instead of being skipped while the run looks clean. Set it to `false` only for paths that some of the workflow's events don't carry: a missing path is then skipped with a warning. |
 | `allow-insecure-address` | `false` | Allow a plain `http` address, e.g. a TEI on the runner's own network. The API key and the Access values are then sent unencrypted, and the action warns about it. |
@@ -96,7 +97,7 @@ never by interpolation into the script.
 | `verdict` | `clean`, `flagged` or `error`. |
 | `scores` | A JSON object mapping each screened name to its highest score, e.g. `{"title":0.0004,"body":0.9996}`. |
 | `flagged` | A JSON array of the flagged names. |
-| `would-escalate` | `true` when a text was flagged, so the action escalates unless it's a dry run. |
+| `would-escalate` | `true` when a text was flagged, or with `escalate-on-error` when TEI couldn't score them, so the action escalates unless it's a dry run. |
 | `escalated` | `true` when the escalation comment or issue was posted. |
 
 ## Permissions
@@ -134,9 +135,15 @@ scored. It fails closed:
 - a body that isn't JSON, or JSON of an unexpected shape;
 - a model without `malicious-label`, or a prediction without a score for it.
 
+Failing closed keeps the texts from an agent, but on its own it tells nobody: a red check looks
+like a flaky service. Whoever wrote a text can cause the TEI errors, by text built to time TEI out
+or by keeping it busy, and an attack that only ever produces red checks may get them rerun or
+ignored. With `escalate-on-error`, a TEI error escalates too; see below.
+
 ## Escalation
 
-Only when a text is flagged and it's not a dry run.
+When a text is flagged, and with `escalate-on-error` when TEI couldn't score the texts, unless
+it's a dry run.
 
 - **Events with a pull request** (`pull_request`, `pull_request_target`, reviews, and comments on
   a pull request), in this order:
@@ -171,6 +178,20 @@ label nor the draft state is a bypass: every run flags a text again, and escalat
 scores at or above the threshold. The remedy is to change the text. The action never un-flags
 anything; close the issue, or remove the label and mark the pull request ready, once the text has
 been changed and screens clean.
+
+**Errors**, with `escalate-on-error`: when TEI couldn't score the texts, the action posts a
+comment on the pull request, or comments on the open issue or opens one, the same way, mentioning
+`notify`. It names the texts that weren't screened and links the source and the run. It differs
+from a flag in three ways:
+
+- no label and no draft, since nothing was flagged;
+- it minimizes the previous comment only when that was an error too, never a flag, so a forced
+  error can't hide one;
+- it doesn't say why scoring failed, which would tell the author of the text what worked. The
+  run's log says why.
+
+A configuration error, an invalid input or a missing field, is the workflow's and never escalates.
+If the error comment or issue can't be posted, the step fails with both messages.
 
 With a `github-token` other than the workflow's, a personal access token or an app's token, set
 `bot-login` to the login it posts as, e.g. `my-app[bot]`, or the action won't recognise its own
@@ -283,7 +304,9 @@ endpoints, or use the action directly.**
   every agent that reads the thread. Error messages from TEI are reduced to their status and type
   for the same reason.
 - **Fail closed.** Anything short of a complete, well-formed answer for every window is the
-  verdict `error` and a failed step, in every mode, never `clean`.
+  verdict `error` and a failed step, in every mode, never `clean`. Set `escalate-on-error` so that
+  a TEI error also reaches a person: otherwise text that keeps TEI from answering is blocked, but
+  nobody hears about it.
 - **Never pass the text through `with` or `env`.** The runner prints every input and environment
   variable of a step in the job log, before any script could mask it. A workflow that writes
   untrusted text into `with:` or `env:`, for this action or any other, has already logged it. So
