@@ -91,12 +91,14 @@ on:
         description: Scan and set every output, but make no changes on GitHub.
         type: boolean
         default: false
+      # On by default here, unlike in the action: this is the deployment, whose outages its
+      # callers want to hear about, and a caller can still turn it off.
       escalate-on-error:
         description: >-
           Whether a run in which TEI couldn't score the texts escalates too, with a comment or the
-          issue but no label or draft.
+          issue but no label or draft. On by default, unlike the action's input.
         type: boolean
-        default: false
+        default: true
       notify:
         description: Handles to mention when escalating, e.g. "@org/moderators".
         type: string
