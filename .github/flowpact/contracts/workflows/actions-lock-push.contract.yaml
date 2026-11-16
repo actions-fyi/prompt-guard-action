@@ -12,5 +12,5 @@ interface:
   outputs: {}
 calls:
   - job: actions-lock
-    uses: actions-fyi/shared-workflows/.github/workflows/_actions-lock.yml@v0.18.1
+    uses: actions-fyi/shared-workflows/.github/workflows/_actions-lock.yml@v1.2.0
 consumers: []
