@@ -47,7 +47,7 @@ jobs:
     permissions:
       contents: read # Declared by the workflows job
       id-token: write # Exchange the job's OIDC token with Octo STS
-    uses: actions-fyi/sync-workflows/.github/workflows/_workflow-sync.yml@v0.1.0
+    uses: actions-fyi/sync-workflows/.github/workflows/_workflow-sync.yml@v0.2.0
     with:
       dry-run: ${{ inputs.dry-run || false }} # Empty on push, schedule and repository_dispatch
 
@@ -58,4 +58,4 @@ jobs:
     # What the dispatch job of _workflow-sync-dispatch.yml declares; a called job can't get more.
     permissions:
       id-token: write # Exchange the job's OIDC token with Octo STS
-    uses: actions-fyi/sync-workflows/.github/workflows/_workflow-sync-dispatch.yml@v0.1.0
+    uses: actions-fyi/sync-workflows/.github/workflows/_workflow-sync-dispatch.yml@v0.2.0
