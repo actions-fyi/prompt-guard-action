@@ -5,8 +5,10 @@ const { formatScore } = require('./verdict');
 // Tells people about a flagged text. On a pull request: the label, a conversion to draft, so it
 // isn't merged or picked up as ready while someone looks, and a comment. Each flag posts a new
 // comment, since GitHub sends no notifications for the mentions in an edited one, and the previous
-// one is minimized as outdated. On any other event: one open issue, found by its label and the
-// marker, which later runs comment on, again with the mentions.
+// one is minimized as outdated. The pull request is the event's, or the one the pull-request input
+// names, for a caller such as a workflow_run listener that screens a pull request's texts. On any
+// other event: one open issue, found by its label and the marker, which later runs comment on,
+// again with the mentions. A closed issue is never found, so the next flag opens a new one.
 //
 // The action's comments and issues start with the marker, and are only recognised by it there,
 // from bot-login: a quote of the marker further down someone else's text never matches.
@@ -34,8 +36,14 @@ class EscalationError extends Error {
   }
 }
 
-// The pull request number, for events that carry one, including comments on a pull request.
-function pullRequestNumber(payload) {
+// The pull request the texts came from: the pull-request input, else the event's, for events
+// that carry one, including comments on a pull request.
+function pullRequestNumber(payload, inputs = {}) {
+  if (inputs.pullRequest) return inputs.pullRequest;
+  return eventPullRequestNumber(payload);
+}
+
+function eventPullRequestNumber(payload) {
   if (payload.pull_request?.number) return payload.pull_request.number;
   if (payload.issue?.pull_request && payload.issue.number) return payload.issue.number;
   return undefined;
@@ -55,9 +63,14 @@ function commitSha(context, pull) {
 }
 
 // Where the flagged text was written: the comment or review for those events, else the pull
-// request, issue or discussion. Only a URL on this GitHub server is used.
-function sourceUrl(context) {
+// request, issue or discussion. Only a URL on this GitHub server is used. A pull-request input
+// that names another pull request than the event's, e.g. on workflow_run, links that one.
+function sourceUrl(context, inputs = {}) {
   const payload = context.payload;
+  if (inputs.pullRequest && inputs.pullRequest !== eventPullRequestNumber(payload)) {
+    const { owner, repo } = context.repo;
+    return `${context.serverUrl}/${owner}/${repo}/pull/${inputs.pullRequest}`;
+  }
   for (const url of [
     payload.comment?.html_url,
     payload.review?.html_url,
@@ -86,7 +99,7 @@ function buildBody({ context, inputs, scores, flagged, subject, actions, sha = '
     lines.push(`| \`${name}\` | ${formatScore(score)} | ${flagged.includes(name) ? '**flagged**' : ''} |`);
   }
   lines.push('');
-  const source = sourceUrl(context);
+  const source = sourceUrl(context, inputs);
   lines.push(
     [source ? `[Source](${source})` : '', sha ? `Commit \`${sha}\`` : '', `[Workflow run](${runUrl(context)})`]
       .filter(Boolean)
@@ -118,7 +131,7 @@ function buildErrorBody({ context, inputs, names, subject, sha = '' }) {
     ...names.map((name) => `| \`${name}\` |`),
     '',
   );
-  const source = sourceUrl(context);
+  const source = sourceUrl(context, inputs);
   lines.push(
     [source ? `[Source](${source})` : '', sha ? `Commit \`${sha}\`` : '', `[Workflow run](${runUrl(context)})`]
       .filter(Boolean)
@@ -311,7 +324,7 @@ async function postIssue({ github, core, inputs, repo, title, body }) {
 
 // Throws an EscalationError when the comment or the issue could not be posted.
 async function escalate({ github, context, core, inputs, scores, flagged }) {
-  const number = pullRequestNumber(context.payload);
+  const number = pullRequestNumber(context.payload, inputs);
   if (number) await escalatePullRequest({ github, context, core, inputs, scores, flagged, number });
   else await escalateIssue({ github, context, core, inputs, scores, flagged });
 }
@@ -319,7 +332,7 @@ async function escalate({ github, context, core, inputs, scores, flagged }) {
 // Throws an EscalationError when the comment or the issue could not be posted. names are the
 // texts that couldn't be scored.
 async function escalateError({ github, context, core, inputs, names }) {
-  const number = pullRequestNumber(context.payload);
+  const number = pullRequestNumber(context.payload, inputs);
   const sha = commitSha(context);
   if (number) {
     const body = buildErrorBody({ context, inputs, names, subject: 'this pull request', sha });

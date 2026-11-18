@@ -28,6 +28,7 @@ const ENV = {
   files: 'PROMPT_GUARD_FILES',
   filesDirectory: 'PROMPT_GUARD_FILES_DIRECTORY',
   threshold: 'PROMPT_GUARD_THRESHOLD',
+  pullRequest: 'PROMPT_GUARD_PULL_REQUEST',
   mode: 'PROMPT_GUARD_MODE',
   dryRun: 'PROMPT_GUARD_DRY_RUN',
   escalateOnError: 'PROMPT_GUARD_ESCALATE_ON_ERROR',
@@ -139,15 +140,29 @@ function parseFiles(value) {
   return files;
 }
 
+// The default, 0.9, is the block_threshold of PromptGuardScanner in Meta's LlamaFirewall:
+// https://github.com/meta-llama/PurpleLlama/blob/0654501399e7cbd560db9501965dc09c567a5563/LlamaFirewall/src/llamafirewall/scanners/prompt_guard_scanner.py#L24
+// At 0.5, short imperative pull request titles such as "feat: remove workflows the source has
+// retired" were flagged, at 0.67.
+const DEFAULT_THRESHOLD = '0.9';
+
 function parseThreshold(value) {
   if (!/^(?:0|1|0?\.\d+|1\.0*)$/.test(value)) {
-    throw new ConfigError('threshold must be a number between 0 and 1, e.g. 0.5.');
+    throw new ConfigError('threshold must be a number between 0 and 1, e.g. 0.9.');
   }
   const threshold = Number(value);
   if (!(threshold > 0 && threshold <= 1)) {
     throw new ConfigError('threshold must be greater than 0 and at most 1.');
   }
   return threshold;
+}
+
+// The pull request the texts came from, for events that carry none, such as workflow_run.
+// Empty means the event's own, if any.
+function parsePullRequest(value) {
+  if (!value) return undefined;
+  if (!/^[1-9]\d{0,9}$/.test(value)) throw new ConfigError('pull-request must be a pull request number, e.g. 42.');
+  return Number(value);
 }
 
 function parseNotify(value) {
@@ -223,7 +238,8 @@ function parseInputs(env = process.env) {
     accessClientId,
     accessClientSecret,
     ...parseSources(env),
-    threshold: parseThreshold(read(env, ENV.threshold) || '0.5'),
+    threshold: parseThreshold(read(env, ENV.threshold) || DEFAULT_THRESHOLD),
+    pullRequest: parsePullRequest(read(env, ENV.pullRequest)),
     mode,
     dryRun: parseBoolean(read(env, ENV.dryRun) || 'false', 'dry-run'),
     escalateOnError: parseBoolean(read(env, ENV.escalateOnError) || 'false', 'escalate-on-error'),

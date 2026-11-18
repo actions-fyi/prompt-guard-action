@@ -59,10 +59,18 @@ inputs:
     description: The directory that files are read from. Empty means GITHUB_WORKSPACE.
     required: false
     default: ""
+  # 0.9 is the block_threshold of PromptGuardScanner in Meta's LlamaFirewall; see src/inputs.js.
   threshold:
     description: The score, between 0 and 1, at or above which a text is flagged.
     required: false
-    default: "0.5"
+    default: "0.9"
+  pull-request:
+    description: >-
+      The number of the pull request the texts came from, for events that carry none, such as
+      workflow_run. A flag then escalates on that pull request instead of the issue. Empty means
+      the event's own, if any.
+    required: false
+    default: ""
   mode:
     description: >-
       audit: a flagged text sets the outputs and escalates, but doesn't fail the step. block: it
@@ -159,6 +167,7 @@ runs:
         PROMPT_GUARD_FILES: ${{ inputs.files }}
         PROMPT_GUARD_FILES_DIRECTORY: ${{ inputs.files-directory }}
         PROMPT_GUARD_THRESHOLD: ${{ inputs.threshold }}
+        PROMPT_GUARD_PULL_REQUEST: ${{ inputs.pull-request }}
         PROMPT_GUARD_MODE: ${{ inputs.mode }}
         PROMPT_GUARD_DRY_RUN: ${{ inputs.dry-run }}
         PROMPT_GUARD_ESCALATE_ON_ERROR: ${{ inputs.escalate-on-error }}
