@@ -13,5 +13,5 @@ interface:
   outputs: {}
 calls:
   - job: zizmor
-    uses: actions-fyi/shared-workflows/.github/workflows/_zizmor.yml@v0.18.1
+    uses: actions-fyi/shared-workflows/.github/workflows/_zizmor.yml@v2.1.0
 consumers: []
