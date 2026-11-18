@@ -703,6 +703,10 @@ test('invalid inputs are configuration errors that never quote the texts', async
     { PROMPT_GUARD_THRESHOLD: 'high' },
     { PROMPT_GUARD_THRESHOLD: '0' },
     { PROMPT_GUARD_THRESHOLD: '1.5' },
+    { PROMPT_GUARD_PULL_REQUEST: '0' },
+    { PROMPT_GUARD_PULL_REQUEST: '-3' },
+    { PROMPT_GUARD_PULL_REQUEST: '#10' },
+    { PROMPT_GUARD_PULL_REQUEST: '10/files' },
     { PROMPT_GUARD_MODE: 'strict' },
     { PROMPT_GUARD_DRY_RUN: 'yes' },
     { PROMPT_GUARD_NOTIFY: '@ok, <script>' },
@@ -748,7 +752,8 @@ test('inputs are parsed with their defaults', () => {
   ]);
   assert.equal(inputs.filesDirectory, '/workspace');
   assert.equal(inputs.address, 'https://tei.example.test/prefix/');
-  assert.equal(inputs.threshold, 0.5);
+  assert.equal(inputs.threshold, 0.9);
+  assert.equal(inputs.pullRequest, undefined);
   assert.equal(inputs.mode, 'audit');
   assert.equal(inputs.dryRun, false);
   assert.equal(inputs.escalateOnError, false);
@@ -821,4 +826,39 @@ test('the issue names the source and a push commit, and nothing it cannot vouch 
     context: prContext({ eventName: 'issues', payload: { issue: { number: 3, html_url: 'https://evil.example/x' }, comment: { html_url: 'https://github.com/a) [x](y' } } }),
   });
   assert.doesNotMatch(bodyOf(foreign, 'issues.create'), /Source/);
+});
+
+test('on workflow_run, pull-request escalates on that pull request and links it', async () => {
+  const github = mockGithub({ pull: { number: 10, state: 'open', draft: false, node_id: 'PR_10', head: { sha: 'abcdef0123456789abcdef0123456789abcdef01' } } });
+  const context = prContext({ eventName: 'workflow_run', payload: { workflow_run: { id: 1, pull_requests: [] } } });
+  const { core } = await run({ texts: { title: INJECTION }, github, context, PROMPT_GUARD_PULL_REQUEST: '10' });
+  assert.equal(core.outputs.escalated, 'true');
+  assert.equal(github.calls.find((c) => c.name === 'pulls.get').params.pull_number, 10);
+  assert.equal(github.calls.find((c) => c.name === 'issues.addLabels').params.issue_number, 10);
+  assert.ok(!github.calls.some((c) => c.name === 'issues.create' || c.name === 'issues.listForRepo'));
+  const comment = github.calls.find((c) => c.name === 'issues.createComment').params;
+  assert.equal(comment.issue_number, 10);
+  assert.match(comment.body, /\[Source\]\(https:\/\/github\.com\/octo-org\/octo-repo\/pull\/10\) · Commit `abcdef0` · \[Workflow run\]/);
+});
+
+test("pull-request naming the event's own pull request keeps the more precise source", async () => {
+  const payload = {
+    issue: { number: 9, pull_request: {}, html_url: 'https://github.com/octo-org/octo-repo/pull/9' },
+    comment: { html_url: 'https://github.com/octo-org/octo-repo/pull/9#issuecomment-123' },
+  };
+  const github = mockGithub({ pull: { number: 9, state: 'open', draft: false, node_id: 'PR_9' } });
+  await run({ texts: { body: INJECTION }, github, context: prContext({ eventName: 'issue_comment', payload }), PROMPT_GUARD_PULL_REQUEST: '9' });
+  assert.match(bodyOf(github), /\[Source\]\(https:\/\/github\.com\/octo-org\/octo-repo\/pull\/9#issuecomment-123\)/);
+});
+
+test('with escalate-on-error, pull-request takes the error to that pull request too', async () => {
+  const github = mockGithub();
+  const tei = mockTei({ override: (path) => (path === '/predict' ? new Response('boom', { status: 500 }) : undefined) });
+  const context = prContext({ eventName: 'workflow_run', payload: { workflow_run: { id: 1 } } });
+  const { verdict } = await run({ texts: { title: 'hi' }, tei, github, context, PROMPT_GUARD_PULL_REQUEST: '10', PROMPT_GUARD_ESCALATE_ON_ERROR: 'true' });
+  assert.equal(verdict, 'error');
+  const comment = github.calls.find((c) => c.name === 'issues.createComment').params;
+  assert.equal(comment.issue_number, 10);
+  assert.match(comment.body, /\[Source\]\(https:\/\/github\.com\/octo-org\/octo-repo\/pull\/10\)/);
+  assert.ok(!github.calls.some((c) => c.name === 'issues.create'));
 });

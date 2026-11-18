@@ -74,6 +74,10 @@ interface:
       required: false
       default: ''
       description: Dot paths into the event payload of the texts to screen, separated by newlines or commas, e.g. "pull_request.title, pull_request.body". Each path is also the text's name. Empty and null fields are skipped.
+    pull-request:
+      required: false
+      default: ''
+      description: The number of the pull request the texts came from, for events that carry none, such as workflow_run. A flag then escalates on that pull request instead of the issue. Empty means the event's own, if any.
     require-fields:
       required: false
       default: 'true'
@@ -84,7 +88,7 @@ interface:
       description: Whether finding nothing to screen, every field and file empty or missing, is the verdict error. false makes it a warning and the verdict clean.
     threshold:
       required: false
-      default: '0.5'
+      default: '0.9'
       description: The score, between 0 and 1, at or above which a text is flagged.
   outputs:
     escalated:
@@ -120,6 +124,7 @@ consumers:
       - mode
       - notify
       - payload-fields
+      - pull-request
       - require-fields
       - require-text
       - threshold

@@ -73,7 +73,8 @@ screened.
 | `payload-fields` | `""` | Dot paths into the event payload, separated by newlines or commas, e.g. `pull_request.title, pull_request.body`. Each path is the text's name. Paths are letters, digits and `_` between dots; `__proto__`, `prototype` and `constructor` are refused. Empty and `null` fields are skipped, a missing one is a warning, and any other value than a string is an error. |
 | `files` | `""` | Files to screen, one `name=path` per line, e.g. `comment=previous-comment.md`. Names are letters, digits, `.`, `_` and `-`, at most 64 characters. Paths are relative to `files-directory` and must stay inside it, also after following symbolic links. |
 | `files-directory` | `""` | The directory `files` are read from; empty means `GITHUB_WORKSPACE`. |
-| `threshold` | `0.5` | A text whose score is at or above this is flagged. |
+| `threshold` | `0.9` | A text whose score is at or above this is flagged. `0.9` is the `block_threshold` of [`PromptGuardScanner` in Meta's LlamaFirewall](https://github.com/meta-llama/PurpleLlama/blob/0654501399e7cbd560db9501965dc09c567a5563/LlamaFirewall/src/llamafirewall/scanners/prompt_guard_scanner.py#L24). Lower values flag short imperative texts, e.g. a pull request title like `feat: remove workflows the source has retired` scores about `0.67`. |
+| `pull-request` | `""` | The number of the pull request the texts came from, for events that carry none, e.g. a `workflow_run` listener that screens a pull request's title and body. A flag then escalates on that pull request, linked as the source, instead of the issue. Empty means the event's own, if any. |
 | `mode` | `audit` | `audit` or `block`; see [below](#audit-block-and-dry-run). |
 | `dry-run` | `false` | Scan and set every output, but make no changes on GitHub. |
 | `escalate-on-error` | `false` | Whether a run in which TEI couldn't score the texts escalates too; see [Escalation](#escalation). A configuration error never escalates. |
@@ -146,7 +147,7 @@ When a text is flagged, and with `escalate-on-error` when TEI couldn't score the
 it's a dry run.
 
 - **Events with a pull request** (`pull_request`, `pull_request_target`, reviews, and comments on
-  a pull request), in this order:
+  a pull request), or any event with `pull-request` set, in this order:
   1. the `label`, created if missing;
   2. a conversion to a draft (GraphQL `convertPullRequestToDraft`), so it isn't merged or picked
      up as ready while someone looks;
@@ -157,7 +158,8 @@ it's a dry run.
      (GraphQL `minimizeComment`).
 - **Other events**: one open issue with the `label` and the marker, opened by `bot-login`. Later
   runs find it by the label and add a comment, mentioning `notify` again. Without a label, it is
-  found by its creator, `bot-login`.
+  found by its creator, `bot-login`. Only an open issue is found: once it is closed, the next flag
+  opens a new issue, so closing it never hides a later one.
 
 The action's comments and issues start with the marker, and only those that start with it, by
 `bot-login`, count as its own: quoting the marker elsewhere matches nothing.
@@ -169,8 +171,9 @@ request to a draft. The comment or the issue is the escalation itself: if it can
 no use.
 
 The comment and the issue never quote the flagged text. They list the names, scores and
-threshold, and link the source: the comment or review the text came from, else the pull request,
-issue or discussion. They name the commit only where the event has one, a pull request's head or
+threshold, and link the source: the comment or review the text came from, else the pull request
+(the one `pull-request` names, if set), issue or discussion. An event with none of them, such as
+`push` or `schedule`, links only the run. They name the commit only where the event has one, a pull request's head or
 a push, and link the run.
 
 **There is no way to acknowledge a flag.** Many people can add or remove a label, so neither the
