@@ -19,10 +19,18 @@ name: Test
 #
 # OpenBao only hands out the secrets to _shared.yml running from refs/heads/main, the merge queue's
 # refs/heads/gh-readonly-queue/main/* or refs/tags/v* (see the binding in _shared.yml). So this
-# runs on pushes to main, in the merge queue and on demand from main, and never on pull_request,
+# tests on pushes to main, in the merge queue and on demand from main, and never on pull_request,
 # whose refs/pull/<n>/merge would be refused. A workflow_dispatch from another branch fails at the
 # OpenBao login for the same reason.
+#
+# It is still triggered on pull_request, but every job is skipped there by its own if. A required
+# check needs a check run on the pull request before the pull request can join the merge queue:
+# without a run, Integration Results stays "Expected" for good. A job skipped by its if reports a
+# check run that counts as passed, and the merge queue then runs the test for real. Each job
+# carries the if itself rather than being skipped through needs, and the trigger has no paths or
+# branches filter, which would leave the check without a run again.
 on:
+  pull_request:
   push:
     branches: [main]
   merge_group:
@@ -44,6 +52,7 @@ defaults:
 jobs:
   texts:
     name: Integration Texts
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions: {}
     steps:
@@ -80,6 +89,7 @@ jobs:
 
   integration:
     name: Integration
+    if: github.event_name != 'pull_request'
     needs: texts
     # The called job can only get the permissions given here.
     permissions:
@@ -105,6 +115,7 @@ jobs:
 
   results:
     name: Integration Results
+    if: github.event_name != 'pull_request'
     needs: integration
     runs-on: ubuntu-latest
     permissions: {}
