@@ -2,8 +2,8 @@
 # The interfaces of the remote reusable workflows and actions this repository uses, at the commit each resolved to.
 version: 1
 remotes:
-  actions-fyi/shared-workflows/.github/workflows/_actions-lock.yml@v0.18.1:
-    sha: 62f4556f15dbf623e76ceeacef49b957fbc76384
+  actions-fyi/shared-workflows/.github/workflows/_actions-lock.yml@v2.1.0:
+    sha: f19a056f70f784c2aada7baad6aea7f2494f2dd7
     kind: workflow
     jobPermissions:
       changes:
@@ -13,8 +13,8 @@ remotes:
       fix:
         contents: read
         id-token: write
-  actions-fyi/shared-workflows/.github/workflows/_claude.yml@v0.18.1:
-    sha: 62f4556f15dbf623e76ceeacef49b957fbc76384
+  actions-fyi/shared-workflows/.github/workflows/_claude.yml@v2.1.0:
+    sha: f19a056f70f784c2aada7baad6aea7f2494f2dd7
     kind: workflow
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN:
@@ -36,8 +36,8 @@ remotes:
         issues: write
         id-token: write
         actions: read
-  actions-fyi/shared-workflows/.github/workflows/_codeql.yml@v0.18.1:
-    sha: 62f4556f15dbf623e76ceeacef49b957fbc76384
+  actions-fyi/shared-workflows/.github/workflows/_codeql.yml@v2.1.0:
+    sha: f19a056f70f784c2aada7baad6aea7f2494f2dd7
     kind: workflow
     inputs:
       languages:
@@ -53,8 +53,8 @@ remotes:
         actions: read
       results:
         id-token: write
-  actions-fyi/shared-workflows/.github/workflows/_explain.yml@v0.18.1:
-    sha: 62f4556f15dbf623e76ceeacef49b957fbc76384
+  actions-fyi/shared-workflows/.github/workflows/_explain.yml@v2.1.0:
+    sha: f19a056f70f784c2aada7baad6aea7f2494f2dd7
     kind: workflow
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN:
@@ -74,8 +74,8 @@ remotes:
       resolve-report:
         issues: write
         pull-requests: write
-  actions-fyi/shared-workflows/.github/workflows/_flowpact.yml@v0.18.1:
-    sha: 62f4556f15dbf623e76ceeacef49b957fbc76384
+  actions-fyi/shared-workflows/.github/workflows/_flowpact.yml@v2.1.0:
+    sha: f19a056f70f784c2aada7baad6aea7f2494f2dd7
     kind: workflow
     jobPermissions:
       check:
@@ -89,15 +89,15 @@ remotes:
         id-token: write
       issue:
         issues: write
-  actions-fyi/shared-workflows/.github/workflows/_label-sync.yml@v0.18.1:
-    sha: 62f4556f15dbf623e76ceeacef49b957fbc76384
+  actions-fyi/shared-workflows/.github/workflows/_label-sync.yml@v2.1.0:
+    sha: f19a056f70f784c2aada7baad6aea7f2494f2dd7
     kind: workflow
     jobPermissions:
       labels:
         contents: read
         issues: write
-  actions-fyi/shared-workflows/.github/workflows/_pr-metadata.yml@v0.18.1:
-    sha: 62f4556f15dbf623e76ceeacef49b957fbc76384
+  actions-fyi/shared-workflows/.github/workflows/_pr-metadata.yml@v2.1.0:
+    sha: f19a056f70f784c2aada7baad6aea7f2494f2dd7
     kind: workflow
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN:
@@ -134,8 +134,8 @@ remotes:
         contents: read
       post-description:
         pull-requests: write
-  actions-fyi/shared-workflows/.github/workflows/_renovate.yml@v0.18.1:
-    sha: 62f4556f15dbf623e76ceeacef49b957fbc76384
+  actions-fyi/shared-workflows/.github/workflows/_renovate.yml@v2.1.0:
+    sha: f19a056f70f784c2aada7baad6aea7f2494f2dd7
     kind: workflow
     jobPermissions:
       renovate:
@@ -145,8 +145,8 @@ remotes:
       fix:
         contents: read
         id-token: write
-  actions-fyi/shared-workflows/.github/workflows/_triage.yml@v0.18.1:
-    sha: 62f4556f15dbf623e76ceeacef49b957fbc76384
+  actions-fyi/shared-workflows/.github/workflows/_triage.yml@v2.1.0:
+    sha: f19a056f70f784c2aada7baad6aea7f2494f2dd7
     kind: workflow
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN:
@@ -164,8 +164,8 @@ remotes:
         issues: read
       apply:
         issues: write
-  actions-fyi/shared-workflows/.github/workflows/_zizmor.yml@v0.18.1:
-    sha: 62f4556f15dbf623e76ceeacef49b957fbc76384
+  actions-fyi/shared-workflows/.github/workflows/_zizmor.yml@v2.1.0:
+    sha: f19a056f70f784c2aada7baad6aea7f2494f2dd7
     kind: workflow
     inputs:
       zizmor-version:
@@ -176,8 +176,8 @@ remotes:
         security-events: write
         contents: read
         actions: read
-  actions-fyi/sync-workflows/.github/workflows/_workflow-sync-dispatch.yml@v0.1.0:
-    sha: 65bf4a9441814ed98ab0fa285ed44fdfc5bb29d1
+  actions-fyi/sync-workflows/.github/workflows/_workflow-sync-dispatch.yml@v0.2.0:
+    sha: dd5ae6220ce9ea0958f52f4ca4ffe07e22c9a744
     kind: workflow
     inputs:
       event-type:
@@ -186,8 +186,8 @@ remotes:
     jobPermissions:
       dispatch:
         id-token: write
-  actions-fyi/sync-workflows/.github/workflows/_workflow-sync.yml@v0.1.0:
-    sha: 65bf4a9441814ed98ab0fa285ed44fdfc5bb29d1
+  actions-fyi/sync-workflows/.github/workflows/_workflow-sync.yml@v0.2.0:
+    sha: dd5ae6220ce9ea0958f52f4ca4ffe07e22c9a744
     kind: workflow
     inputs:
       dry-run:

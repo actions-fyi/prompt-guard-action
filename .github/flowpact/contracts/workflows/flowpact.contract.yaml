@@ -12,5 +12,5 @@ interface:
   outputs: {}
 calls:
   - job: flowpact
-    uses: actions-fyi/shared-workflows/.github/workflows/_flowpact.yml@v0.18.1
+    uses: actions-fyi/shared-workflows/.github/workflows/_flowpact.yml@v2.1.0
 consumers: []
