@@ -155,6 +155,18 @@ jobs:
   guard:
     name: Prompt Guard
     runs-on: ubuntu-latest
+    # Runs that escalate to the repository's one open issue wait for each other, so that two runs
+    # flagging at once can't both find no issue and both open one. A group belongs to the
+    # repository the run is in, which for a caller is the caller's, where the issue is. Runs with a
+    # pull request escalate on it, so each gets a group of its own and waits for nothing.
+    # queue: max keeps up to 100 runs waiting instead of cancelling all but one, so no screen is
+    # dropped; it can't be combined with cancel-in-progress.
+    concurrency:
+      group: >-
+        ${{ (github.event.pull_request || github.event.issue.pull_request || inputs.pull-request)
+        && format('prompt-guard-run-{0}-{1}', github.run_id, github.run_attempt)
+        || 'prompt-guard-issue' }}
+      queue: max
     # No contents: read: nothing reads the repository. The action is fetched with the job, and
     # download-artifact reads this run's artifacts with the runtime token.
     permissions:

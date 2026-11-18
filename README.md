@@ -196,6 +196,24 @@ from a flag in three ways:
 A configuration error, an invalid input or a missing field, is the workflow's and never escalates.
 If the error comment or issue can't be posted, the step fails with both messages.
 
+**Concurrent runs and the issue**: the action looks for its open issue and opens one if there is
+none, so two runs that escalate to the issue at the same moment can each open one. The reusable
+workflow `_shared.yml` prevents that with a concurrency group, which only runs without a pull
+request share. Using the action directly, give the job that runs it a group of its own:
+
+```yaml
+    concurrency:
+      group: >-
+        ${{ (github.event.pull_request || github.event.issue.pull_request)
+        && format('prompt-guard-run-{0}-{1}', github.run_id, github.run_attempt)
+        || 'prompt-guard-issue' }}
+      queue: max
+```
+
+`queue: max` keeps up to 100 runs waiting, in order, instead of cancelling all but one pending
+run. Without it, a third run would cancel the one waiting, and its texts would go unscreened.
+Add `|| inputs.pull-request` to the condition if the job sets `pull-request`.
+
 With a `github-token` other than the workflow's, a personal access token or an app's token, set
 `bot-login` to the login it posts as, e.g. `my-app[bot]`, or the action won't recognise its own
 comments and issue.
