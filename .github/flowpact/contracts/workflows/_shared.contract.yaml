@@ -54,6 +54,11 @@ interface:
       required: false
       default: ''
       description: Dot paths into the event payload of the texts to screen, e.g. "pull_request.title, pull_request.body". Each path is also the text's name.
+    pull-request:
+      type: string
+      required: false
+      default: ''
+      description: The number of the pull request the texts came from, for events that carry none, such as workflow_run. A flag then escalates on that pull request instead of the issue.
     require-fields:
       type: boolean
       required: false
@@ -67,7 +72,7 @@ interface:
     threshold:
       type: string
       required: false
-      default: '0.5'
+      default: '0.9'
       description: The score, between 0 and 1, at or above which a text is flagged.
   secrets:
     CF_ACCESS_CLIENT_ID:
@@ -110,6 +115,7 @@ uses:
       mode: ${{ inputs.mode }}
       notify: ${{ inputs.notify }}
       payload-fields: ${{ inputs.payload-fields }}
+      pull-request: ${{ inputs.pull-request }}
       require-fields: ${{ inputs.require-fields }}
       require-text: ${{ inputs.require-text }}
       threshold: ${{ inputs.threshold }}
