@@ -4,7 +4,7 @@ $schema: https://ciatlas.github.io/flowpact/schemas/contract/v1.json
 version: 1
 kind: workflow
 path: .github/workflows/flowpact.yml
-name: Check Workflow Data Flow
+name: Audit
 triggers:
   - push
 interface:
@@ -12,5 +12,5 @@ interface:
   outputs: {}
 calls:
   - job: flowpact
-    uses: actions-fyi/shared-workflows/.github/workflows/_flowpact.yml@v2.1.0
+    uses: actions-fyi/shared-workflows/.github/workflows/_flowpact.yml@v3.0.0
 consumers: []

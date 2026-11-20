@@ -4,7 +4,7 @@ $schema: https://ciatlas.github.io/flowpact/schemas/contract/v1.json
 version: 1
 kind: workflow
 path: .github/workflows/actions-lock-push.yml
-name: Check Actions Lockfile
+name: Validate Actions Lockfile
 triggers:
   - push
 interface:
@@ -12,5 +12,5 @@ interface:
   outputs: {}
 calls:
   - job: actions-lock
-    uses: actions-fyi/shared-workflows/.github/workflows/_actions-lock.yml@v2.1.0
+    uses: actions-fyi/shared-workflows/.github/workflows/_actions-lock.yml@v3.0.0
 consumers: []
