@@ -1,10 +1,9 @@
 name: Audit
-
+# Audits pushes to main. Pull requests and merge groups are covered by the org ruleset workflow
+# Audit GitHub Actions of actions-fyi/ruleset-workflows.
 on:
   push:
     branches: ["main"]
-  pull_request:
-    branches: ["**"]
 
 permissions: {}
 
@@ -16,4 +15,4 @@ jobs:
       security-events: write # Upload the SARIF results to code scanning
       contents: read # Check out the repository
       actions: read # Let upload-sarif read the workflow run
-    uses: actions-fyi/shared-workflows/.github/workflows/_zizmor.yml@v2.1.0
+    uses: actions-fyi/shared-workflows/.github/workflows/_zizmor.yml@v3.0.0

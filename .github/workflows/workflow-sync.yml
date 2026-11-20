@@ -57,5 +57,6 @@ jobs:
     if: github.event_name == 'push' && github.repository == 'actions-fyi/.github'
     # What the dispatch job of _workflow-sync-dispatch.yml declares; a called job can't get more.
     permissions:
+      contents: read # The egress firewall reads .github/egress-firewall.yaml with this token
       id-token: write # Exchange the job's OIDC token with Octo STS
     uses: actions-fyi/sync-workflows/.github/workflows/_workflow-sync-dispatch.yml@v0.2.0
