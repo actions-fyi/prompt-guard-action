@@ -15,8 +15,8 @@ remotes:
       commit:
         contents: read
         id-token: write
-  actions-fyi/shared-workflows/.github/workflows/_claude.yml@v2.1.0:
-    sha: f19a056f70f784c2aada7baad6aea7f2494f2dd7
+  actions-fyi/shared-workflows/.github/workflows/_claude.yml@v3.0.0:
+    sha: e594653ae25a378c3f30d543e6273f6b056a6ca9
     kind: workflow
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN:
@@ -26,6 +26,7 @@ remotes:
       CF_ACCESS_CLIENT_SECRET: {}
     jobPermissions:
       collect:
+        contents: read
         issues: read
         pull-requests: read
       guard:
@@ -101,8 +102,8 @@ remotes:
       issue:
         contents: read
         issues: write
-  actions-fyi/shared-workflows/.github/workflows/_label-sync.yml@v2.1.0:
-    sha: f19a056f70f784c2aada7baad6aea7f2494f2dd7
+  actions-fyi/shared-workflows/.github/workflows/_label-sync.yml@v3.0.0:
+    sha: e594653ae25a378c3f30d543e6273f6b056a6ca9
     kind: workflow
     jobPermissions:
       labels:
@@ -166,8 +167,8 @@ remotes:
       fix:
         contents: read
         id-token: write
-  actions-fyi/shared-workflows/.github/workflows/_triage.yml@v2.1.0:
-    sha: f19a056f70f784c2aada7baad6aea7f2494f2dd7
+  actions-fyi/shared-workflows/.github/workflows/_triage.yml@v3.0.0:
+    sha: e594653ae25a378c3f30d543e6273f6b056a6ca9
     kind: workflow
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN:
@@ -184,6 +185,7 @@ remotes:
         contents: read
         issues: read
       apply:
+        contents: read
         issues: write
   actions-fyi/shared-workflows/.github/workflows/_zizmor.yml@v3.0.0:
     sha: e594653ae25a378c3f30d543e6273f6b056a6ca9
