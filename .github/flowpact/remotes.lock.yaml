@@ -15,8 +15,8 @@ remotes:
       commit:
         contents: read
         id-token: write
-  actions-fyi/shared-workflows/.github/workflows/_claude.yml@v2.1.0:
-    sha: f19a056f70f784c2aada7baad6aea7f2494f2dd7
+  actions-fyi/shared-workflows/.github/workflows/_claude.yml@v2.2.0:
+    sha: e4d71e047d0051ddc91e05ba2367d962b98ad537
     kind: workflow
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN:
@@ -101,8 +101,8 @@ remotes:
       issue:
         contents: read
         issues: write
-  actions-fyi/shared-workflows/.github/workflows/_label-sync.yml@v2.1.0:
-    sha: f19a056f70f784c2aada7baad6aea7f2494f2dd7
+  actions-fyi/shared-workflows/.github/workflows/_label-sync.yml@v2.2.0:
+    sha: e4d71e047d0051ddc91e05ba2367d962b98ad537
     kind: workflow
     jobPermissions:
       labels:
@@ -166,8 +166,8 @@ remotes:
       fix:
         contents: read
         id-token: write
-  actions-fyi/shared-workflows/.github/workflows/_triage.yml@v2.1.0:
-    sha: f19a056f70f784c2aada7baad6aea7f2494f2dd7
+  actions-fyi/shared-workflows/.github/workflows/_triage.yml@v2.2.0:
+    sha: e4d71e047d0051ddc91e05ba2367d962b98ad537
     kind: workflow
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN:
