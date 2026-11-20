@@ -6,12 +6,11 @@ kind: workflow
 path: .github/workflows/renovate.yml
 name: Validate
 triggers:
-  - pull_request
   - push
 interface:
   inputs: {}
   outputs: {}
 calls:
   - job: renovate
-    uses: actions-fyi/shared-workflows/.github/workflows/_renovate.yml@v2.1.0
+    uses: actions-fyi/shared-workflows/.github/workflows/_renovate.yml@v3.0.0
 consumers: []

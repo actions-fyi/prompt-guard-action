@@ -1,9 +1,9 @@
 name: Validate
+# Validates pushes to main. Pull requests and merge groups are covered by the org ruleset workflow
+# Validate Renovate Config of actions-fyi/ruleset-workflows.
 on:
   push:
     branches: [main]
-  pull_request:
-    branches: ["**"]
 
 permissions: {}
 
@@ -13,5 +13,5 @@ jobs:
     # The union of what the jobs of _renovate.yml declare; a called job can't get more.
     permissions:
       contents: read # Read the Renovate configs
-      id-token: write # Let the fix job get a commit token from Octo STS
-    uses: actions-fyi/shared-workflows/.github/workflows/_renovate.yml@v2.1.0
+      id-token: write # Get the Octo STS token for the fix commit on pull requests
+    uses: actions-fyi/shared-workflows/.github/workflows/_renovate.yml@v3.0.0
