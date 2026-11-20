@@ -81,6 +81,8 @@ screened.
 | `require-text` | `true` | Whether finding nothing to screen, every field and file empty or missing, is the verdict `error`. With `false` it's a warning, and the verdict `clean`. |
 | `require-fields` | `true` | Whether a `payload-fields` path that isn't in the event payload is the verdict `error`, so a misspelled path, e.g. `pull_request.bdy`, fails instead of being skipped while the run looks clean. Set it to `false` only for paths that some of the workflow's events don't carry: a missing path is then skipped with a warning. |
 | `allow-insecure-address` | `false` | Allow a plain `http` address, e.g. a TEI on the runner's own network. The API key and the Access values are then sent unencrypted, and the action warns about it. |
+| `retries` | `6` | How often a request to TEI is retried after a timeout, a connection error, or a 429, 502, 503 or 504; see [Retries](#retries). `0` to `10`. |
+| `request-timeout` | `60` | Seconds one request to TEI may take before it is aborted and counts as a failed attempt. `1` to `600`. |
 | `notify` | `""` | Handles to mention when escalating, e.g. `@my-org/moderators @octocat`. |
 | `label` | `prompt-guard:flagged` | The label for a flagged pull request or the escalation issue. Empty adds none. At most 50 characters on one line, without commas (the issue lookup filters by it, and GitHub splits that filter at commas) or `` ` ``, `<` and `>`. |
 | `marker` | `<!-- prompt-guard -->` | The hidden HTML comment that identifies this action's comment or issue. Use a different one per workflow if several screen the same pull request. |
@@ -129,10 +131,12 @@ scored. It fails closed:
 - nothing to screen at all, unless `require-text` is `false`;
 - a `payload-fields` path missing from the payload, unless `require-fields` is `false`;
 - a plain `http` address, unless `allow-insecure-address` is `true`;
-- TEI unreachable, or answering with any non-2xx status (429, 502, 503 and 504 are retried twice);
+- TEI unreachable, or answering with any non-2xx status, once `retries` are used up for a
+  timeout, a connection error, or a 429, 502, 503 or 504; see [Retries](#retries);
 - a 401 or 403: the API key or the Access token was refused;
-- a redirect, or an HTML page instead of JSON, which is how Cloudflare Access turns away a request
-  without a valid service token; the message says so;
+- a redirect, or an HTML page instead of JSON with any other status than 429, 502, 503 or 504,
+  which is how Cloudflare Access turns away a request without a valid service token; the message
+  says so;
 - a body that isn't JSON, or JSON of an unexpected shape;
 - a model without `malicious-label`, or a prediction without a score for it.
 
@@ -140,6 +144,27 @@ Failing closed keeps the texts from an agent, but on its own it tells nobody: a 
 like a flaky service. Whoever wrote a text can cause the TEI errors, by text built to time TEI out
 or by keeping it busy, and an attack that only ever produces red checks may get them rerun or
 ignored. With `escalate-on-error`, a TEI error escalates too; see below.
+
+### Retries
+
+Each request to TEI, `/info`, `/tokenize` and `/predict`, is retried on its own when it times out,
+can't connect, or gets a 429, 502, 503 or 504, including the HTML error page a proxy such as
+Cloudflare shows while TEI is down. Retry *n* waits 2<sup>*n*−1</sup> seconds plus up to 10%
+jitter, or as long as a `Retry-After` header asks if that is longer, but never more than 60
+seconds. Every retry is logged with its path, its reason and the wait. Any other status, 500
+included, fails at once.
+
+| `retries` | Waits | Rides out an outage of about |
+| --- | --- | --- |
+| `2` | 1, 2 s | 3 s |
+| `4` | 1, 2, 4, 8 s | 15 s |
+| `6` (default) | 1, 2, 4, 8, 16, 32 s | 1 minute |
+| `8` | … 32, 60, 60 s | 3 minutes |
+
+Those are the waits for a TEI that answers at once with an error. One that hangs costs up to
+`request-timeout` per attempt too: with the defaults, a request gives up after at most
+7 × 60 s + 63 s, about 8 minutes. A lower `request-timeout` shortens that, as long as it stays
+above the slowest `/predict` your TEI takes.
 
 ## Escalation
 

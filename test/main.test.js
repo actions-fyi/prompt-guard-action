@@ -91,8 +91,35 @@ test('a fetch that times out is retried, then gives the verdict error', async ()
   });
   const { verdict, core } = await run({ texts: { body: 'hi' }, tei });
   assert.equal(verdict, 'error');
+  assert.equal(attempts, 7);
+  assert.match(core.failed[0], /\/info could not be reached \(TimeoutError\) after 6 retries/);
+});
+
+test('retries and request-timeout reach the client, and each retry is logged', async () => {
+  let attempts = 0;
+  const tei = mockTei({ override: (path) => (path === '/info' ? (attempts++, new Response('', { status: 503 })) : undefined) });
+  const { verdict, core } = await run({ texts: { body: 'hi' }, tei, PROMPT_GUARD_RETRIES: '2' });
+  assert.equal(verdict, 'error');
   assert.equal(attempts, 3);
-  assert.match(core.failed[0], /\/info could not be reached \(TimeoutError\)/);
+  assert.match(core.failed[0], /\/info failed \(HTTP 503\) after 2 retries/);
+  const logged = core.logs.filter((line) => /retry \d of 2/.test(line));
+  assert.equal(logged.length, 2);
+  assert.match(logged[0], /\/info: HTTP 503, retry 1 of 2 in 1\.\ds\./);
+
+  const base = { PROMPT_GUARD_ADDRESS: 'https://tei.example.test', PROMPT_GUARD_PAYLOAD_FIELDS: 'body' };
+  assert.equal(parseInputs(base).retries, 6);
+  assert.equal(parseInputs(base).timeoutMs, 60_000);
+  assert.equal(parseInputs({ ...base, PROMPT_GUARD_RETRIES: '0', PROMPT_GUARD_REQUEST_TIMEOUT: '15' }).timeoutMs, 15_000);
+  for (const [key, value, name] of [
+    ['PROMPT_GUARD_RETRIES', '11', 'retries'],
+    ['PROMPT_GUARD_RETRIES', '-1', 'retries'],
+    ['PROMPT_GUARD_RETRIES', '2.5', 'retries'],
+    ['PROMPT_GUARD_REQUEST_TIMEOUT', '0', 'request-timeout'],
+    ['PROMPT_GUARD_REQUEST_TIMEOUT', '601', 'request-timeout'],
+    ['PROMPT_GUARD_REQUEST_TIMEOUT', '1e3', 'request-timeout'],
+  ]) {
+    assert.throws(() => parseInputs({ ...base, [key]: value }), new RegExp(`^ConfigError: ${name} must be a whole number`));
+  }
 });
 
 test('/tokenize offsets that are not UTF-8 byte offsets give the verdict error', async () => {
@@ -626,9 +653,9 @@ test('an error escalation that cannot be posted fails the step a second time', a
 
 test('5xx answers that may pass are retried, others are not', async () => {
   let infos = 0;
-  const flaky = mockTei({ override: (path) => (path === '/info' && ++infos < 3 ? new Response('', { status: 503 }) : undefined) });
+  const flaky = mockTei({ override: (path) => (path === '/info' && ++infos < 7 ? new Response('', { status: 503 }) : undefined) });
   assert.equal((await run({ texts: { body: 'hi' }, tei: flaky })).verdict, 'clean');
-  assert.equal(infos, 3);
+  assert.equal(infos, 7);
 
   let errors = 0;
   const broken = mockTei({ override: (path) => (path === '/info' ? (errors++, json({ error: 'x', error_type: 'backend' }, 500)) : undefined) });

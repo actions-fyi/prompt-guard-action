@@ -125,6 +125,20 @@ inputs:
     description: Whether address may be plain http, which sends the credentials unencrypted.
     required: false
     default: "false"
+  retries:
+    description: >-
+      How often a request to TEI is retried when it times out, can't connect, or gets a 429, 502,
+      503 or 504, before the verdict is error. Retry n waits 2^(n-1) seconds, 1, 2, 4 and so on,
+      or longer if Retry-After asks for it, but at most 60 seconds. The default, 6, rides out
+      about a minute of TEI being down. 0 to 10.
+    required: false
+    default: "6"
+  request-timeout:
+    description: >-
+      Seconds a single request to TEI may take before it is aborted and counts as a failed
+      attempt. With hangs, a request can take (retries + 1) times this, plus the waits. 1 to 600.
+    required: false
+    default: "60"
   bot-login:
     description: >-
       The login that github-token posts as, used to find this action's own comment and issue.
@@ -179,6 +193,8 @@ runs:
         PROMPT_GUARD_REQUIRE_TEXT: ${{ inputs.require-text }}
         PROMPT_GUARD_REQUIRE_FIELDS: ${{ inputs.require-fields }}
         PROMPT_GUARD_ALLOW_INSECURE_ADDRESS: ${{ inputs.allow-insecure-address }}
+        PROMPT_GUARD_RETRIES: ${{ inputs.retries }}
+        PROMPT_GUARD_REQUEST_TIMEOUT: ${{ inputs.request-timeout }}
       with:
         github-token: ${{ inputs.github-token }}
         script: return await require(process.env.ACTION_PATH + '/src/main.js')({ github, context, core })

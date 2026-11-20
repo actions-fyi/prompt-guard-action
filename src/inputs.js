@@ -40,6 +40,8 @@ const ENV = {
   requireText: 'PROMPT_GUARD_REQUIRE_TEXT',
   requireFields: 'PROMPT_GUARD_REQUIRE_FIELDS',
   allowInsecureAddress: 'PROMPT_GUARD_ALLOW_INSECURE_ADDRESS',
+  retries: 'PROMPT_GUARD_RETRIES',
+  requestTimeout: 'PROMPT_GUARD_REQUEST_TIMEOUT',
 };
 
 // The env names that hold secrets, masked before anything else runs.
@@ -165,6 +167,22 @@ function parsePullRequest(value) {
   return Number(value);
 }
 
+// A whole number within [min, max], written in plain digits.
+function parseInteger(value, name, min, max) {
+  if (!/^\d{1,4}$/.test(value) || Number(value) < min || Number(value) > max) {
+    throw new ConfigError(`${name} must be a whole number from ${min} to ${max}.`);
+  }
+  return Number(value);
+}
+
+// Retry n waits 2^(n-1) seconds (1, 2, 4, ...; see retryDelay in tei.js), so 6 retries wait 63
+// seconds in all. No single wait exceeds a minute, so 10, the most, waits about 5 minutes.
+const DEFAULT_RETRIES = '6';
+const MAX_RETRIES = 10;
+// Seconds that one request may take before it is aborted and counts as a failed attempt.
+const DEFAULT_REQUEST_TIMEOUT = '60';
+const MAX_REQUEST_TIMEOUT = 600;
+
 function parseNotify(value) {
   if (!value) return [];
   const handles = [];
@@ -232,6 +250,8 @@ function parseInputs(env = process.env) {
   return {
     address: parseAddress(read(env, ENV.address), allowInsecureAddress),
     allowInsecureAddress,
+    retries: parseInteger(read(env, ENV.retries) || DEFAULT_RETRIES, 'retries', 0, MAX_RETRIES),
+    timeoutMs: parseInteger(read(env, ENV.requestTimeout) || DEFAULT_REQUEST_TIMEOUT, 'request-timeout', 1, MAX_REQUEST_TIMEOUT) * 1000,
     requireText: parseBoolean(read(env, ENV.requireText) || 'true', 'require-text'),
     requireFields: parseBoolean(read(env, ENV.requireFields) || 'true', 'require-fields'),
     apiKey: read(env, ENV.apiKey),

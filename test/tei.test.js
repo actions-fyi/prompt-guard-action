@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { TRIGGER, json, tokenize, mockTei, filler, noSleep } = require('./helpers');
-const { createClient, parseInfo, batches, segmentText, cutWindows, fitWindows, scoreText, TeiError } = require('../src/tei');
+const { createClient, parseInfo, batches, segmentText, cutWindows, fitWindows, scoreText, retryDelay, parseRetryAfter, TeiError } = require('../src/tei');
 
 const info = { maxInputLength: 512, maxClientBatchSize: 32, labels: ['BENIGN', 'MALICIOUS'] };
 const client = (tei) => createClient({ address: 'https://tei.example.test/', apiKey: 'k', fetch: tei.fetch, sleep: noSleep });
@@ -136,7 +136,7 @@ test('texts over TEI character limit are segmented before /tokenize', async () =
   assert.ok(first.body.inputs.every((s) => Array.from(s).length <= 64 * 200));
 });
 
-test('a request that times out is aborted, retried twice, then a TeiError', async () => {
+test('a request that times out is aborted, retried six times, then a TeiError', async () => {
   let attempts = 0;
   const fetch = (url, init) =>
     new Promise((resolve, reject) => {
@@ -147,11 +147,105 @@ test('a request that times out is aborted, retried twice, then a TeiError', asyn
   // AbortSignal.timeout doesn't keep the event loop alive on its own.
   const keepAlive = setInterval(() => {}, 5);
   try {
-    await assert.rejects(slow.info(), (error) => error instanceof TeiError && /could not be reached \(TimeoutError\)/.test(error.message));
+    await assert.rejects(slow.info(), (error) => error instanceof TeiError && /could not be reached \(TimeoutError\) after 6 retries/.test(error.message));
   } finally {
     clearInterval(keepAlive);
   }
+  assert.equal(attempts, 7);
+});
+
+test('retryDelay doubles from one second, with up to 10% jitter, capped at a minute', () => {
+  const none = () => 0;
+  assert.deepEqual([0, 1, 2, 3, 4, 5].map((n) => retryDelay(n, 0, none)), [1000, 2000, 4000, 8000, 16000, 32000]);
+  assert.equal(retryDelay(6, 0, none), 60_000);
+  assert.equal(retryDelay(9, 0, none), 60_000);
+  assert.equal(retryDelay(3, 0, () => 1), 8800);
+  // Retry-After wins when it asks for longer, never when it asks for less, and is capped too.
+  assert.equal(retryDelay(0, 5000, none), 5000);
+  assert.equal(retryDelay(4, 5000, none), 16000);
+  assert.equal(retryDelay(0, 3_600_000, none), 60_000);
+});
+
+test('parseRetryAfter reads seconds and HTTP dates and ignores anything else', () => {
+  const now = Date.parse('2026-11-20T12:00:00Z');
+  assert.equal(parseRetryAfter('7', now), 7000);
+  assert.equal(parseRetryAfter(' 0 ', now), 0);
+  assert.equal(parseRetryAfter('Fri, 20 Nov 2026 12:00:30 GMT', now), 30_000);
+  assert.equal(parseRetryAfter('Fri, 20 Nov 2026 11:00:00 GMT', now), 0);
+  assert.equal(parseRetryAfter('-5', now), 0);
+  assert.equal(parseRetryAfter('soon', now), 0);
+  assert.equal(parseRetryAfter(null, now), 0);
+});
+
+// A client whose sleeps are recorded instead of waited, without jitter.
+function recording(fetch, options = {}) {
+  const sleeps = [];
+  const retries = [];
+  const c = createClient({
+    address: 'https://tei.example.test/',
+    fetch,
+    sleep: async (ms) => void sleeps.push(ms),
+    random: () => 0,
+    onRetry: (event) => retries.push(event),
+    ...options,
+  });
+  return { client: c, sleeps, retries };
+}
+
+test('a TEI that stays down is retried six times, waiting 63 seconds in all, then a TeiError', async () => {
+  let attempts = 0;
+  const { client: c, sleeps, retries } = recording(async () => (attempts++, new Response('', { status: 503 })));
+  await assert.rejects(c.info(), (error) => error instanceof TeiError && error.message === '/info failed (HTTP 503) after 6 retries.');
+  assert.equal(attempts, 7);
+  assert.deepEqual(sleeps, [1000, 2000, 4000, 8000, 16000, 32000]);
+  assert.equal(sleeps.reduce((a, b) => a + b, 0), 63_000);
+  assert.deepEqual(retries.map((r) => [r.path, r.reason, r.attempt, r.retries]), [1, 2, 3, 4, 5, 6].map((n) => ['info', 'HTTP 503', n, 6]));
+});
+
+test('a TEI that comes back within the retries answers normally', async () => {
+  const tei = mockTei();
+  let attempts = 0;
+  const { client: c, sleeps } = recording((url, init) => (++attempts <= 5 ? Promise.resolve(new Response('', { status: 502 })) : tei.fetch(url, init)));
+  const data = await c.info();
+  assert.equal(data.max_input_length, 512);
+  assert.deepEqual(sleeps, [1000, 2000, 4000, 8000, 16000]);
+});
+
+test('Retry-After stretches the wait, up to a minute', async () => {
+  const answers = [
+    new Response('', { status: 429, headers: { 'retry-after': '20' } }),
+    new Response('', { status: 503, headers: { 'retry-after': '600' } }),
+    new Response('', { status: 503, headers: { 'retry-after': '1' } }),
+  ];
+  const tei = mockTei();
+  const { client: c, sleeps } = recording((url, init) => (answers.length ? Promise.resolve(answers.shift()) : tei.fetch(url, init)));
+  await c.info();
+  assert.deepEqual(sleeps, [20_000, 60_000, 4000]);
+});
+
+test("a proxy's HTML error page for a 502 is retried, and reported as the status, not as a login page", async () => {
+  const page = () => new Response('<!DOCTYPE html><title>502 Bad gateway</title>', { status: 502, headers: { 'content-type': 'text/html' } });
+  let attempts = 0;
+  const { client: c } = recording(async () => (attempts++, page()), { retries: 2 });
+  await assert.rejects(c.info(), (error) => error.message === '/info failed (HTTP 502) after 2 retries.');
   assert.equal(attempts, 3);
+});
+
+test('retries 0 makes a single attempt', async () => {
+  let attempts = 0;
+  const { client: c, sleeps } = recording(async () => (attempts++, new Response('', { status: 503 })), { retries: 0 });
+  await assert.rejects(c.info(), (error) => error.message === '/info failed (HTTP 503).');
+  assert.equal(attempts, 1);
+  assert.deepEqual(sleeps, []);
+});
+
+test('a 500 and a 401 are not retried', async () => {
+  for (const status of [500, 401]) {
+    let attempts = 0;
+    const { client: c } = recording(async () => (attempts++, new Response('', { status })));
+    await assert.rejects(c.info(), TeiError);
+    assert.equal(attempts, 1);
+  }
 });
 
 // /tokenize answers that scoreText must refuse, each with the message it gives.

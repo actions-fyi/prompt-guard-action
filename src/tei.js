@@ -32,9 +32,31 @@ const MAX_BATCH_BYTES = 1_000_000;
 // How often a window that re-tokenizes too long is split again before giving up.
 const MAX_SPLITS = 3;
 const RETRYABLE = new Set([429, 502, 503, 504]);
+// Retry n waits 2^n seconds (1, 2, 4, 8, ...), plus up to 10% jitter so that runs which failed
+// together don't retry together. A Retry-After header may ask for longer. No single wait is longer
+// than this.
+const MAX_RETRY_DELAY_MS = 60_000;
+const DEFAULT_RETRIES = 6;
+const DEFAULT_TIMEOUT_MS = 60_000;
 
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Retry-After is either a number of seconds or an HTTP date. Anything else is ignored.
+function parseRetryAfter(value, now = Date.now()) {
+  if (!value) return 0;
+  const trimmed = value.trim();
+  if (/^\d{1,9}$/.test(trimmed)) return Number(trimmed) * 1000;
+  const date = Date.parse(trimmed);
+  return Number.isFinite(date) ? Math.max(0, date - now) : 0;
+}
+
+// The wait before retry number attempt + 1: 2^attempt seconds with jitter, or what Retry-After
+// asks for if that is longer, capped at MAX_RETRY_DELAY_MS.
+function retryDelay(attempt, retryAfterMs = 0, random = Math.random) {
+  const backoff = 1000 * 2 ** attempt * (1 + 0.1 * random());
+  return Math.round(Math.min(MAX_RETRY_DELAY_MS, Math.max(backoff, retryAfterMs)));
+}
 
 const ACCESS_HINT =
   'That is how Cloudflare Access (or another gate in front of TEI) rejects a request: check access-client-id and access-client-secret.';
@@ -46,8 +68,12 @@ function createClient({
   accessClientSecret,
   fetch = globalThis.fetch,
   sleep = defaultSleep,
-  timeoutMs = 60_000,
-  retries = 2,
+  random = Math.random,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+  retries = DEFAULT_RETRIES,
+  // Called before each wait with the path, the reason and the wait, e.g. to log it. The reason
+  // is a status or an error code, never a body.
+  onRetry = () => {},
 }) {
   const headers = { Accept: 'application/json' };
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
@@ -71,12 +97,15 @@ function createClient({
       try {
         response = await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
       } catch (error) {
+        const reason = error?.cause?.code || error?.name || 'network error';
         if (attempt < retries) {
-          await sleep(1000 * 2 ** attempt);
+          const delay = retryDelay(attempt, 0, random);
+          onRetry({ path, reason, attempt: attempt + 1, retries, delay });
+          await sleep(delay);
           continue;
         }
-        const reason = error?.cause?.code || error?.name || 'network error';
-        throw new TeiError(`/${path} could not be reached (${reason}).`);
+        const gaveUp = retries > 0 ? ` after ${retries} ${retries === 1 ? 'retry' : 'retries'}` : '';
+        throw new TeiError(`/${path} could not be reached (${reason})${gaveUp}.`);
       }
 
       const status = response.status;
@@ -84,8 +113,18 @@ function createClient({
         throw new TeiError(`/${path} answered with a redirect (HTTP ${status}). ${ACCESS_HINT}`);
       }
       const text = await response.text();
+      // Checked before the HTML check: a proxy in front of TEI, Cloudflare among them, answers
+      // these with an HTML error page of its own while TEI is down or overloaded. A login page
+      // never has one of these statuses.
+      const retryable = RETRYABLE.has(status);
+      if (retryable && attempt < retries) {
+        const delay = retryDelay(attempt, parseRetryAfter(response.headers.get('retry-after')), random);
+        onRetry({ path, reason: `HTTP ${status}`, attempt: attempt + 1, retries, delay });
+        await sleep(delay);
+        continue;
+      }
       const contentType = response.headers.get('content-type') || '';
-      if (/\btext\/html\b/i.test(contentType) || /^\s*</.test(text)) {
+      if (!retryable && (/\btext\/html\b/i.test(contentType) || /^\s*</.test(text))) {
         throw new TeiError(`/${path} answered with an HTML page (HTTP ${status}), not JSON, most likely a login page. ${ACCESS_HINT}`);
       }
       if (status === 401 || status === 403) {
@@ -93,10 +132,6 @@ function createClient({
           `/${path} refused the request (HTTP ${status}): check api-key` +
             (headers['CF-Access-Client-Id'] ? ', access-client-id and access-client-secret.' : '.'),
         );
-      }
-      if (RETRYABLE.has(status) && attempt < retries) {
-        await sleep(1000 * 2 ** attempt);
-        continue;
       }
       if (status < 200 || status >= 300) {
         // TEI's ErrorResponse is {error, error_type}. Only the type is reported: the message of
@@ -110,7 +145,8 @@ function createClient({
         } catch {
           // Not JSON; the status says enough.
         }
-        throw new TeiError(`/${path} failed (HTTP ${status}${errorType}).`);
+        const gaveUp = retryable && retries > 0 ? ` after ${retries} ${retries === 1 ? 'retry' : 'retries'}` : '';
+        throw new TeiError(`/${path} failed (HTTP ${status}${errorType})${gaveUp}.`);
       }
       try {
         return JSON.parse(text);
@@ -315,6 +351,11 @@ async function scoreText(client, info, text, maliciousLabel) {
 module.exports = {
   TeiError,
   OVERLAP_TOKENS,
+  MAX_RETRY_DELAY_MS,
+  DEFAULT_RETRIES,
+  DEFAULT_TIMEOUT_MS,
+  parseRetryAfter,
+  retryDelay,
   createClient,
   parseInfo,
   batches,

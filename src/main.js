@@ -31,7 +31,7 @@ function explain(error) {
   return `An unexpected ${error?.name || 'error'} occurred.`;
 }
 
-module.exports = async function main({ github, context, core, env = process.env, fetch = globalThis.fetch, sleep }) {
+module.exports = async function main({ github, context, core, env = process.env, fetch = globalThis.fetch, sleep, random }) {
   // Before anything can log or send them.
   for (const key of SECRET_ENV) {
     const value = (env[key] ?? '').trim();
@@ -62,7 +62,14 @@ module.exports = async function main({ github, context, core, env = process.env,
     }
 
     if (texts.length > 0) {
-      const client = createClient({ ...inputs, fetch, sleep });
+      const client = createClient({
+        ...inputs,
+        fetch,
+        sleep,
+        random,
+        onRetry: ({ path, reason, attempt, retries, delay }) =>
+          core.info(`/${path}: ${reason}, retry ${attempt} of ${retries} in ${(delay / 1000).toFixed(1)}s.`),
+      });
       const info = parseInfo(await client.info(), inputs.maliciousLabel);
       for (const { name, text } of texts) {
         const { score, windows } = await scoreText(client, info, text, inputs.maliciousLabel);
