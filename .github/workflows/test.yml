@@ -23,14 +23,10 @@ defaults:
 jobs:
   unit:
     name: Unit
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-firewall
     permissions:
       contents: read # Check out the repository
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@v2.23.0
-        with:
-          egress-policy: audit
       - name: Checkout Repository
         uses: actions/checkout@v7.0.1
         with:

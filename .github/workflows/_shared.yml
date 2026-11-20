@@ -19,9 +19,9 @@ name: Prompt Guard
 # paths are constants in the job's env, not inputs: a caller that could set the TEI address would
 # receive the API key, and one that could set the OpenBao address and the audience would receive
 # an OIDC token the real role accepts. Configuration variables are no safer: in a called workflow,
-# vars resolve to the caller's repository. harden-runner blocks every other host, so a constant
-# changed in a pull request can't send the secrets elsewhere without also changing the allow
-# list next to it.
+# vars resolve to the caller's repository. Nothing limits the job's egress: it can't run on an
+# egress firewall runner yet (see the guard job), so the constants, OpenBao's trust policy and
+# review of this file are what keep the secrets on their way.
 #
 # The action runs with `uses: $/`, which resolves to this repository at the commit this workflow
 # runs at, wherever it was called from. `./` would resolve to the caller's checkout instead.
@@ -37,7 +37,7 @@ name: Prompt Guard
 # validates them before anything uses them: letters, digits, ".", "_" and "-" only. vault-action
 # splits extraHeaders at newlines, so a CF_ACCESS_* value holding "x\nhost: evil.example" would add
 # a Host header. got uses that header for TLS SNI and certificate verification: the connection
-# still goes to the address of secrets.actions.fyi, which harden-runner allows, but the login
+# still goes to the address of secrets.actions.fyi, OPENBAO_ADDRESS, but the login
 # request, with the job's OIDC token, is addressed to, and verified against, a host the caller
 # chose. PROMPT_GUARD_CLIENT_ID becomes a header to TEI, so it is held to the same rule.
 #
@@ -154,6 +154,10 @@ defaults:
 jobs:
   guard:
     name: Prompt Guard
+    # Not ubuntu-24.04-firewall, the egress firewall's runner: its runner version is older than
+    # 2.336.0 and refuses the `uses: $/` step below (github-early-access/actions-native-egress-
+    # firewall#39). Once it can run there, the job needs contents: read for the firewall to read
+    # .github/egress-firewall.yaml, and must list TEI and OpenBao's hosts there.
     runs-on: ubuntu-latest
     # Runs that escalate to the repository's one open issue wait for each other, so that two runs
     # flagging at once can't both find no issue and both open one. A group belongs to the
@@ -173,7 +177,7 @@ jobs:
       id-token: write # Request the OIDC token that OpenBao's JWT role checks
       pull-requests: write # Label a flagged pull request and convert it to a draft
       issues: write # Comment on the pull request, or open and comment on the escalation issue
-    # The deployment, as constants; see the header. Change them together with allowed-endpoints.
+    # The deployment, as constants; see the header.
     env:
       TEI_ADDRESS: https://promptguard.actions.fyi
       OPENBAO_ADDRESS: https://secrets.actions.fyi
@@ -190,27 +194,6 @@ jobs:
       would-escalate: ${{ steps.guard.outputs.would-escalate }}
       escalated: ${{ steps.guard.outputs.escalated }}
     steps:
-      # Blocks every host but these, so the secrets can only reach TEI and OpenBao. harden-runner
-      # v2.22.3 installs step-security/agent v0.18.0, whose addImplicitEndpoints (agent.go) also
-      # allows, without listing:
-      # - *.actions.githubusercontent.com: the OIDC token endpoint, and the results service that
-      #   download-artifact talks to;
-      # - actions-results-receiver-production.githubapp.com and
-      #   productionresultssa*.blob.core.windows.net: artifact storage;
-      # - codeload.github.com, and the Actions domains of GitHub's meta API;
-      # - agent.api.stepsecurity.io and prod.app-api.stepsecurity.io, while telemetry is on.
-      # v2.22.3 has no input to turn these off. The actions are fetched before this step runs.
-      - name: Harden the runner (Block all but TEI, OpenBao and the GitHub API)
-        uses: step-security/harden-runner@v2.23.0
-        with:
-          egress-policy: block
-          # Space-separated, so folded. api.github.com: the comment, label, draft (GraphQL) and
-          # issue of an escalation. promptguard.actions.fyi: TEI, TEI_ADDRESS.
-          # secrets.actions.fyi: OpenBao, OPENBAO_ADDRESS.
-          allowed-endpoints: >-
-            api.github.com:443
-            promptguard.actions.fyi:443
-            secrets.actions.fyi:443
       # The caller's secrets are validated before vault-action or the action sees them; see the
       # header. They reach the script through env, never interpolated into it, and as secrets they
       # are masked in the log. Messages name a secret, never its value.

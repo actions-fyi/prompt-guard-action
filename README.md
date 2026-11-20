@@ -294,10 +294,11 @@ TEI and OpenBao addresses, the JWT audience, the auth method, path and role, and
 OpenBao hands the secrets to this file, whoever calls it, so a caller that could set the TEI
 address would receive the API key, and one that could set the OpenBao address and the audience
 would receive an OIDC token that the real role accepts. Configuration variables don't help: in a
-called workflow, `vars` are the caller's. The job's harden-runner also blocks every host except
-TEI, OpenBao and `api.github.com`, besides the GitHub and StepSecurity hosts that harden-runner
-always allows. **Other organisations copy `_shared.yml` and set their own constants and allowed
-endpoints, or use the action directly.**
+called workflow, `vars` are the caller's. Nothing limits the job's egress for now: its `uses: $/`
+step can't run on GitHub's egress firewall runner yet, whose runner version is too old for it
+([actions-native-egress-firewall#39](https://github.com/github-early-access/actions-native-egress-firewall/issues/39)).
+**Other organisations copy `_shared.yml` and set their own constants, or use the action
+directly.**
 
 - **OpenBao**: a JWT auth method at `github-actions` with the issuer
   `https://token.actions.githubusercontent.com`, and a role `prompt-guard` with

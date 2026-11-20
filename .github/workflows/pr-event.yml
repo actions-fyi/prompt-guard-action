@@ -9,15 +9,12 @@ permissions: {}
 jobs:
   record:
     name: Record
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-firewall
+    permissions:
+      contents: read # The egress firewall reads .github/egress-firewall.yaml with this token
     concurrency:
       group: pr-event-${{ github.event.pull_request.number }}
       cancel-in-progress: true
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@v2.23.0
-        with:
-          egress-policy: audit
-
       - name: Record Event
         run: echo "::notice::Pull request event recorded for workflow_run listeners"
