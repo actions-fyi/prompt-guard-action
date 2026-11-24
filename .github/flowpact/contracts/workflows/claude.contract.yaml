@@ -15,7 +15,7 @@ interface:
   outputs: {}
 calls:
   - job: claude
-    uses: actions-fyi/shared-workflows/.github/workflows/_claude.yml@v3.0.0
+    uses: actions-fyi/shared-workflows/.github/workflows/_claude.yml@v4.1.0
     secrets:
       CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
       CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
