@@ -21,9 +21,9 @@ interface:
   outputs: {}
 calls:
   - job: dispatch
-    uses: actions-fyi/sync-workflows/.github/workflows/_workflow-sync-dispatch.yml@v0.2.0
+    uses: actions-fyi/sync-workflows/.github/workflows/_workflow-sync-dispatch.yml@v0.6.0
   - job: workflows
-    uses: actions-fyi/sync-workflows/.github/workflows/_workflow-sync.yml@v0.2.0
+    uses: actions-fyi/sync-workflows/.github/workflows/_workflow-sync.yml@v0.6.0
     with:
       dry-run: ${{ inputs.dry-run || false }}
 consumers: []
