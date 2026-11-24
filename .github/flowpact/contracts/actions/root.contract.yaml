@@ -90,6 +90,10 @@ interface:
       required: false
       default: '0.9'
       description: The score, between 0 and 1, at or above which a text is flagged.
+    title-threshold:
+      required: false
+      default: '0.995'
+      description: 'The threshold for titles instead of threshold: the texts named title or ending in .title, such as pull_request.title.'
   outputs:
     escalated:
       description: true when the comment or the issue was posted.
@@ -128,6 +132,7 @@ consumers:
       - require-fields
       - require-text
       - threshold
+      - title-threshold
     reads:
       - escalated
       - flagged
