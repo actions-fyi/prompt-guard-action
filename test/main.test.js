@@ -140,8 +140,7 @@ test('a malicious text is flagged and escalated on the pull request in audit mod
   assert.equal(comment.issue_number, 7);
   assert.ok(comment.body.startsWith('<!-- prompt-guard -->'));
   assert.match(comment.body, /@octo-org\/moderators @octocat/);
-  assert.match(comment.body, /\| `body` \| 0\.9995 \| \*\*flagged\*\* \|/);
-  assert.match(comment.body, /threshold of 0\.5/);
+  assert.match(comment.body, /\| `body` \| 0\.9995 \| 0\.5 \| \*\*flagged\*\* \|/);
   assert.match(comment.body, /Commit `0123456`/);
   assert.match(comment.body, /https:\/\/github\.com\/octo-org\/octo-repo\/actions\/runs\/4242/);
   assert.match(comment.body, /The pull request is labeled `prompt-guard:flagged`\. It was converted to a draft\./);
@@ -154,7 +153,7 @@ test('block mode fails the step on a flagged text, after escalating', async () =
   assert.equal(verdict, 'flagged');
   assert.equal(core.outputs.escalated, 'true');
   assert.equal(core.failed.length, 1);
-  assert.match(core.failed[0], /flagged body \(0\.9995\)/);
+  assert.match(core.failed[0], /flagged body \(0\.9995, threshold 0\.5\)/);
 });
 
 test('block mode passes clean texts', async () => {
@@ -688,6 +687,23 @@ test('the threshold decides what is flagged', async () => {
   assert.equal((await run({ texts: { body: INJECTION }, PROMPT_GUARD_THRESHOLD: '1' })).verdict, 'clean');
 });
 
+test('titles are checked against title-threshold, other texts against threshold', async () => {
+  // The mock scores a text with the trigger 0.9995 and any other 0.0004.
+  const texts = { title: INJECTION, issue: { title: INJECTION }, subtitle: INJECTION, body: 'hi' };
+  const PROMPT_GUARD_PAYLOAD_FIELDS = 'title, issue.title, subtitle, body';
+  const flaggedWith = async (thresholds) => {
+    const { core } = await run({ texts, PROMPT_GUARD_PAYLOAD_FIELDS, ...thresholds });
+    return { flagged: JSON.parse(core.outputs.flagged), core };
+  };
+
+  const lenient = await flaggedWith({ PROMPT_GUARD_THRESHOLD: '0.9', PROMPT_GUARD_TITLE_THRESHOLD: '0.9999' });
+  assert.deepEqual(lenient.flagged, ['subtitle']);
+
+  const strict = await flaggedWith({ PROMPT_GUARD_THRESHOLD: '1', PROMPT_GUARD_TITLE_THRESHOLD: '0.9' });
+  assert.deepEqual(strict.flagged, ['title', 'issue.title']);
+  assert.match(strict.core.logs.join('\n'), /title \(0\.9995, threshold 0\.9\), issue\.title \(0\.9995, threshold 0\.9\)/);
+});
+
 test('invalid inputs are configuration errors that never quote the texts', async () => {
   const cases = [
     { PROMPT_GUARD_PAYLOAD_FIELDS: '' },
@@ -703,6 +719,9 @@ test('invalid inputs are configuration errors that never quote the texts', async
     { PROMPT_GUARD_THRESHOLD: 'high' },
     { PROMPT_GUARD_THRESHOLD: '0' },
     { PROMPT_GUARD_THRESHOLD: '1.5' },
+    { PROMPT_GUARD_TITLE_THRESHOLD: 'high' },
+    { PROMPT_GUARD_TITLE_THRESHOLD: '0' },
+    { PROMPT_GUARD_TITLE_THRESHOLD: '1.5' },
     { PROMPT_GUARD_PULL_REQUEST: '0' },
     { PROMPT_GUARD_PULL_REQUEST: '-3' },
     { PROMPT_GUARD_PULL_REQUEST: '#10' },
@@ -753,6 +772,7 @@ test('inputs are parsed with their defaults', () => {
   assert.equal(inputs.filesDirectory, '/workspace');
   assert.equal(inputs.address, 'https://tei.example.test/prefix/');
   assert.equal(inputs.threshold, 0.9);
+  assert.equal(inputs.titleThreshold, 0.995);
   assert.equal(inputs.pullRequest, undefined);
   assert.equal(inputs.mode, 'audit');
   assert.equal(inputs.dryRun, false);

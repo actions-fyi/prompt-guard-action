@@ -28,6 +28,7 @@ const ENV = {
   files: 'PROMPT_GUARD_FILES',
   filesDirectory: 'PROMPT_GUARD_FILES_DIRECTORY',
   threshold: 'PROMPT_GUARD_THRESHOLD',
+  titleThreshold: 'PROMPT_GUARD_TITLE_THRESHOLD',
   pullRequest: 'PROMPT_GUARD_PULL_REQUEST',
   mode: 'PROMPT_GUARD_MODE',
   dryRun: 'PROMPT_GUARD_DRY_RUN',
@@ -146,15 +147,31 @@ function parseFiles(value) {
 // retired" were flagged, at 0.67.
 const DEFAULT_THRESHOLD = '0.9';
 
-function parseThreshold(value) {
+// Titles get their own threshold. A title is one short imperative line, which this model scores
+// high whatever it says: "ci: Remove obsolete workflow_run triggers" scored 0.99. A threshold that
+// clears such titles would let injections in longer texts through, so it applies to titles only.
+const DEFAULT_TITLE_THRESHOLD = '0.995';
+
+function parseThreshold(value, name = 'threshold') {
   if (!/^(?:0|1|0?\.\d+|1\.0*)$/.test(value)) {
-    throw new ConfigError('threshold must be a number between 0 and 1, e.g. 0.9.');
+    throw new ConfigError(`${name} must be a number between 0 and 1, e.g. 0.9.`);
   }
   const threshold = Number(value);
   if (!(threshold > 0 && threshold <= 1)) {
-    throw new ConfigError('threshold must be greater than 0 and at most 1.');
+    throw new ConfigError(`${name} must be greater than 0 and at most 1.`);
   }
   return threshold;
+}
+
+// A text is a title when its name is title or ends in .title: the file name title, or a payload
+// field such as pull_request.title or issue.title.
+function isTitle(name) {
+  return name === 'title' || name.endsWith('.title');
+}
+
+// The threshold that applies to the text of this name.
+function thresholdFor(inputs, name) {
+  return isTitle(name) ? inputs.titleThreshold : inputs.threshold;
 }
 
 // The pull request the texts came from, for events that carry none, such as workflow_run.
@@ -239,6 +256,7 @@ function parseInputs(env = process.env) {
     accessClientSecret,
     ...parseSources(env),
     threshold: parseThreshold(read(env, ENV.threshold) || DEFAULT_THRESHOLD),
+    titleThreshold: parseThreshold(read(env, ENV.titleThreshold) || DEFAULT_TITLE_THRESHOLD, 'title-threshold'),
     pullRequest: parsePullRequest(read(env, ENV.pullRequest)),
     mode,
     dryRun: parseBoolean(read(env, ENV.dryRun) || 'false', 'dry-run'),
@@ -251,4 +269,4 @@ function parseInputs(env = process.env) {
   };
 }
 
-module.exports = { ConfigError, ENV, SECRET_ENV, FORBIDDEN_SEGMENTS, parseInputs };
+module.exports = { ConfigError, ENV, SECRET_ENV, FORBIDDEN_SEGMENTS, parseInputs, thresholdFor };

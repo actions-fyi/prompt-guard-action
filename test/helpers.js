@@ -226,6 +226,7 @@ function env(overrides = {}) {
     PROMPT_GUARD_API_KEY: 'test-api-key',
     PROMPT_GUARD_PAYLOAD_FIELDS: Object.keys(texts ?? DEFAULT_TEXTS).join(', '),
     PROMPT_GUARD_THRESHOLD: '0.5',
+    PROMPT_GUARD_TITLE_THRESHOLD: '0.5',
     PROMPT_GUARD_MODE: 'audit',
     PROMPT_GUARD_DRY_RUN: 'false',
     PROMPT_GUARD_NOTIFY: '',
