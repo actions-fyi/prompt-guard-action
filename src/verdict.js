@@ -1,9 +1,10 @@
 'use strict';
 
-// Turns the scores into a verdict. A text is flagged when its score reaches the threshold.
-function decide(scores, threshold) {
+// Turns the scores into a verdict. A text is flagged when its score reaches its threshold, which
+// thresholdOf gives by the text's name.
+function decide(scores, thresholdOf) {
   const flagged = Object.entries(scores)
-    .filter(([, score]) => score >= threshold)
+    .filter(([name, score]) => score >= thresholdOf(name))
     .map(([name]) => name);
   return { verdict: flagged.length > 0 ? 'flagged' : 'clean', flagged };
 }

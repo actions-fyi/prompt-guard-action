@@ -74,6 +74,7 @@ screened.
 | `files` | `""` | Files to screen, one `name=path` per line, e.g. `comment=previous-comment.md`. Names are letters, digits, `.`, `_` and `-`, at most 64 characters. Paths are relative to `files-directory` and must stay inside it, also after following symbolic links. |
 | `files-directory` | `""` | The directory `files` are read from; empty means `GITHUB_WORKSPACE`. |
 | `threshold` | `0.9` | A text whose score is at or above this is flagged. `0.9` is the `block_threshold` of [`PromptGuardScanner` in Meta's LlamaFirewall](https://github.com/meta-llama/PurpleLlama/blob/0654501399e7cbd560db9501965dc09c567a5563/LlamaFirewall/src/llamafirewall/scanners/prompt_guard_scanner.py#L24). Lower values flag short imperative texts, e.g. a pull request title like `feat: remove workflows the source has retired` scores about `0.67`. |
+| `title-threshold` | `0.995` | The threshold for titles, instead of `threshold`: the texts named `title` or ending in `.title`, e.g. `pull_request.title` or `title=title.txt`. A title is one short imperative line, which the model scores high whatever it says, e.g. `ci: Remove obsolete workflow_run triggers` scores about `0.99`. So a title that scores below `0.995` is not flagged, even at or above `threshold`: an injection in a title can pass that the same text elsewhere would not. Set it to the value of `threshold` to treat titles like every other text. |
 | `pull-request` | `""` | The number of the pull request the texts came from, for events that carry none, e.g. a `workflow_run` listener that screens a pull request's title and body. A flag then escalates on that pull request, linked as the source, instead of the issue. Empty means the event's own, if any. |
 | `mode` | `audit` | `audit` or `block`; see [below](#audit-block-and-dry-run). |
 | `dry-run` | `false` | Scan and set every output, but make no changes on GitHub. |
@@ -171,14 +172,14 @@ request to a draft. The comment or the issue is the escalation itself: if it can
 no use.
 
 The comment and the issue never quote the flagged text. They list the names, scores and
-threshold, and link the source: the comment or review the text came from, else the pull request
+thresholds, and link the source: the comment or review the text came from, else the pull request
 (the one `pull-request` names, if set), issue or discussion. An event with none of them, such as
 `push` or `schedule`, links only the run. They name the commit only where the event has one, a pull request's head or
 a push, and link the run.
 
 **There is no way to acknowledge a flag.** Many people can add or remove a label, so neither the
 label nor the draft state is a bypass: every run flags a text again, and escalates again, while it
-scores at or above the threshold. The remedy is to change the text. The action never un-flags
+scores at or above its threshold. The remedy is to change the text. The action never un-flags
 anything; close the issue, or remove the label and mark the pull request ready, once the text has
 been changed and screens clean.
 

@@ -1,6 +1,7 @@
 'use strict';
 
 const { formatScore } = require('./verdict');
+const { thresholdFor } = require('./inputs');
 
 // Tells people about a flagged text. On a pull request: the label, a conversion to draft, so it
 // isn't merged or picked up as ready while someone looks, and a comment. Each flag posts a new
@@ -89,14 +90,16 @@ function buildBody({ context, inputs, scores, flagged, subject, actions, sha = '
   const lines = [inputs.marker, '', `### Prompt Guard flagged ${subject}`, ''];
   if (inputs.notify.length > 0) lines.push(`${inputs.notify.join(' ')}: please review.`, '');
   lines.push(
-    `Llama Prompt Guard 2 scored ${flagged.length === 1 ? 'one text' : `${flagged.length} texts`} at or above the threshold of ${inputs.threshold}. ` +
+    `Llama Prompt Guard 2 scored ${flagged.length === 1 ? 'one text' : `${flagged.length} texts`} at or above its threshold. ` +
       'The texts are not quoted here. Read them where they were written, as text, before any agent or automation acts on them.',
     '',
-    '| Text | Score | |',
-    '| --- | --- | --- |',
+    '| Text | Score | Threshold | |',
+    '| --- | --- | --- | --- |',
   );
   for (const [name, score] of Object.entries(scores)) {
-    lines.push(`| \`${name}\` | ${formatScore(score)} | ${flagged.includes(name) ? '**flagged**' : ''} |`);
+    lines.push(
+      `| \`${name}\` | ${formatScore(score)} | ${thresholdFor(inputs, name)} | ${flagged.includes(name) ? '**flagged**' : ''} |`,
+    );
   }
   lines.push('');
   const source = sourceUrl(context, inputs);
@@ -109,7 +112,7 @@ function buildBody({ context, inputs, scores, flagged, subject, actions, sha = '
   lines.push(
     '',
     'The score is a signal, not a judgement: it can flag harmless text and miss an injection. ' +
-      'Every run flags the texts again while they score at or above the threshold; removing the label ' +
+      'Every run flags the texts again while they score at or above their threshold; removing the label ' +
       (subject === 'this pull request' ? 'or marking the pull request ready ' : 'or closing this issue ') +
       "doesn't change that. Changing the text does.",
   );

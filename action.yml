@@ -64,6 +64,14 @@ inputs:
     description: The score, between 0 and 1, at or above which a text is flagged.
     required: false
     default: "0.9"
+  # Titles are short imperative lines, which the model scores high whatever they say; see
+  # src/inputs.js.
+  title-threshold:
+    description: >-
+      The threshold for titles instead of threshold: the texts named title or ending in .title,
+      such as pull_request.title.
+    required: false
+    default: "0.995"
   pull-request:
     description: >-
       The number of the pull request the texts came from, for events that carry none, such as
@@ -167,6 +175,7 @@ runs:
         PROMPT_GUARD_FILES: ${{ inputs.files }}
         PROMPT_GUARD_FILES_DIRECTORY: ${{ inputs.files-directory }}
         PROMPT_GUARD_THRESHOLD: ${{ inputs.threshold }}
+        PROMPT_GUARD_TITLE_THRESHOLD: ${{ inputs.title-threshold }}
         PROMPT_GUARD_PULL_REQUEST: ${{ inputs.pull-request }}
         PROMPT_GUARD_MODE: ${{ inputs.mode }}
         PROMPT_GUARD_DRY_RUN: ${{ inputs.dry-run }}

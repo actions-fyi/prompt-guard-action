@@ -84,6 +84,12 @@ on:
         description: The score, between 0 and 1, at or above which a text is flagged.
         type: string
         default: "0.9"
+      title-threshold:
+        description: >-
+          The threshold for titles instead of threshold: the texts named title or ending in .title,
+          such as pull_request.title.
+        type: string
+        default: "0.995"
       pull-request:
         description: >-
           The number of the pull request the texts came from, for events that carry none, such as
@@ -268,6 +274,7 @@ jobs:
           require-text: ${{ inputs.require-text }}
           require-fields: ${{ inputs.require-fields }}
           threshold: ${{ inputs.threshold }}
+          title-threshold: ${{ inputs.title-threshold }}
           pull-request: ${{ inputs.pull-request }}
           mode: ${{ inputs.mode }}
           dry-run: ${{ inputs.dry-run }}

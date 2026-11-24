@@ -74,6 +74,11 @@ interface:
       required: false
       default: '0.9'
       description: The score, between 0 and 1, at or above which a text is flagged.
+    title-threshold:
+      type: string
+      required: false
+      default: '0.995'
+      description: 'The threshold for titles instead of threshold: the texts named title or ending in .title, such as pull_request.title.'
   secrets:
     CF_ACCESS_CLIENT_ID:
       required: false
@@ -119,6 +124,7 @@ uses:
       require-fields: ${{ inputs.require-fields }}
       require-text: ${{ inputs.require-text }}
       threshold: ${{ inputs.threshold }}
+      title-threshold: ${{ inputs.title-threshold }}
 consumers:
   - from: .github/workflows/integration.yml
     job: integration
