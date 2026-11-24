@@ -8,7 +8,7 @@
 // escalate-on-error, a TEI error also escalates: it is the error the author of a text can cause.
 // A configuration error is the workflow's, and the failed step is enough.
 
-const { ConfigError, SECRET_ENV, parseInputs } = require('./inputs');
+const { ConfigError, SECRET_ENV, parseInputs, thresholdFor } = require('./inputs');
 const { collectTexts } = require('./sources');
 const { TeiError, createClient, parseInfo, scoreText } = require('./tei');
 const { decide, formatScore } = require('./verdict');
@@ -92,7 +92,7 @@ module.exports = async function main({ github, context, core, env = process.env,
     return outputs.verdict;
   }
 
-  const { verdict, flagged } = decide(outputs.scores, inputs.threshold);
+  const { verdict, flagged } = decide(outputs.scores, (name) => thresholdFor(inputs, name));
   Object.assign(outputs, { verdict, flagged, wouldEscalate: verdict === 'flagged' });
 
   let escalationError;
@@ -110,13 +110,15 @@ module.exports = async function main({ github, context, core, env = process.env,
   }
   setOutputs(core, outputs);
 
-  const summary = flagged.map((name) => `${name} (${formatScore(outputs.scores[name])})`).join(', ');
+  const summary = flagged
+    .map((name) => `${name} (${formatScore(outputs.scores[name])}, threshold ${thresholdFor(inputs, name)})`)
+    .join(', ');
   if (verdict === 'flagged' && inputs.mode === 'block') {
-    core.setFailed(`Prompt Guard flagged ${summary} at a threshold of ${inputs.threshold}.`);
+    core.setFailed(`Prompt Guard flagged ${summary}.`);
   } else if (verdict === 'flagged') {
-    core.warning(`Prompt Guard flagged ${summary} at a threshold of ${inputs.threshold} (audit mode, not blocking).`);
+    core.warning(`Prompt Guard flagged ${summary} (audit mode, not blocking).`);
   } else {
-    core.info(`Prompt Guard found nothing at or above the threshold of ${inputs.threshold}.`);
+    core.info(`Prompt Guard found nothing at or above the threshold of ${inputs.threshold}, or ${inputs.titleThreshold} for titles.`);
   }
   if (escalationError) core.setFailed(explain(escalationError));
   return outputs.verdict;
