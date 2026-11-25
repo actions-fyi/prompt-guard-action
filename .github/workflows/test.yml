@@ -23,7 +23,8 @@ defaults:
 jobs:
   unit:
     name: Unit
-    runs-on: ubuntu-24.04-firewall
+    # The egress firewall's runner is the org's; a fork has none, so its runs use ubuntu-24.04.
+    runs-on: ${{ github.repository_owner == 'actions-fyi' && 'ubuntu-24.04-firewall' || 'ubuntu-24.04' }}
     permissions:
       contents: read # Check out the repository
     steps:
