@@ -25,6 +25,8 @@ permissions: {}
 jobs:
   coverage:
     name: Coverage
+    # Not in a fork: the coverage providers are the org's, and a fork names none.
+    if: github.repository_owner == 'actions-fyi'
     cache-mode: none
     # The union of what the jobs of _coverage.yml declare; a called job can't get more.
     permissions:

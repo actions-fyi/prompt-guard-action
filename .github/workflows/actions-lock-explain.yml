@@ -14,6 +14,9 @@ permissions: {}
 jobs:
   explain:
     name: Explain
+    # Not in a fork: Claude needs the org's secrets, and a failure on main would open an issue in
+    # the fork.
+    if: github.repository_owner == 'actions-fyi'
     cache-mode: none
     permissions:
       actions: read # Read the run's jobs and download their logs

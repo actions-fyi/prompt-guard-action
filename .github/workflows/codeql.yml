@@ -21,6 +21,10 @@ permissions: {}
 jobs:
   codeql:
     name: CodeQL
+    # Not in a fork: a fork that wants CodeQL turns on its default setup, which this workflow's
+    # upload would conflict with, and posting CodeQL Results needs Octo STS, which trusts only the
+    # org's repositories.
+    if: github.repository_owner == 'actions-fyi'
     # The union of what the jobs of _codeql.yml declare; a called job can't get more.
     permissions:
       contents: read # Read the repository's languages and check it out
