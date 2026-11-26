@@ -58,6 +58,22 @@ remotes:
       results:
         contents: read
         id-token: write
+  actions-fyi/shared-workflows/.github/workflows/_coverage.yml@v4.2.0:
+    sha: 2c5a48607eee785221c47dd7dee9e462ba93d0cd
+    kind: workflow
+    jobPermissions:
+      find:
+        contents: read
+        actions: read
+        pull-requests: read
+      github:
+        contents: read
+        actions: read
+        code-quality: write
+      deepsource:
+        contents: read
+        actions: read
+        id-token: write
   actions-fyi/shared-workflows/.github/workflows/_explain.yml@v4.2.0:
     sha: 2c5a48607eee785221c47dd7dee9e462ba93d0cd
     kind: workflow
