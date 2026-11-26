@@ -12,7 +12,7 @@ interface:
   outputs: {}
 calls:
   - job: triage
-    uses: actions-fyi/shared-workflows/.github/workflows/_triage.yml@v4.3.0
+    uses: actions-fyi/shared-workflows/.github/workflows/_triage.yml@v4.4.0
     secrets:
       CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
       CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
