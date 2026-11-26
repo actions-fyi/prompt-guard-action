@@ -15,5 +15,5 @@ interface:
   outputs: {}
 calls:
   - job: codeql
-    uses: actions-fyi/shared-workflows/.github/workflows/_codeql.yml@v4.2.0
+    uses: actions-fyi/shared-workflows/.github/workflows/_codeql.yml@v4.3.0
 consumers: []

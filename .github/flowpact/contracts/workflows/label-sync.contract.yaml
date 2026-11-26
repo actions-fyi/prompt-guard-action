@@ -14,5 +14,5 @@ interface:
   outputs: {}
 calls:
   - job: labels
-    uses: actions-fyi/shared-workflows/.github/workflows/_label-sync.yml@v4.2.0
+    uses: actions-fyi/shared-workflows/.github/workflows/_label-sync.yml@v4.3.0
 consumers: []
