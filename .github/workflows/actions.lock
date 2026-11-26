@@ -12,6 +12,7 @@ workflows:
     '.github/workflows/auto-label.yml': []
     '.github/workflows/claude.yml': []
     '.github/workflows/codeql.yml': []
+    '.github/workflows/coverage.yml': []
     '.github/workflows/flowpact.yml': []
     '.github/workflows/integration.yml':
         - 'actions/upload-artifact@v7.0.2'
