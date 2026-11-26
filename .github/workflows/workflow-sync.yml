@@ -43,12 +43,13 @@ jobs:
   workflows:
     name: Workflows
     # A push only dispatches; _workflow-sync.yml skips itself in the source.
-    if: github.event_name != 'push'
+    # Not in a fork: Octo STS grants the sync token only to the org's repositories.
+    if: github.repository_owner == 'actions-fyi' && github.event_name != 'push'
     # What the workflows job of _workflow-sync.yml declares; a called job can't get more.
     permissions:
       contents: read # Declared by the workflows job
       id-token: write # Exchange the job's OIDC token with Octo STS
-    uses: actions-fyi/sync-workflows/.github/workflows/_workflow-sync.yml@v0.6.0
+    uses: actions-fyi/sync-workflows/.github/workflows/_workflow-sync.yml@v0.8.0
     with:
       dry-run: ${{ inputs.dry-run || false }} # Empty on push, schedule and repository_dispatch
 
@@ -60,4 +61,4 @@ jobs:
     permissions:
       contents: read # The egress firewall reads .github/egress-firewall.yaml with this token
       id-token: write # Exchange the job's OIDC token with Octo STS
-    uses: actions-fyi/sync-workflows/.github/workflows/_workflow-sync-dispatch.yml@v0.6.0
+    uses: actions-fyi/sync-workflows/.github/workflows/_workflow-sync-dispatch.yml@v0.8.0
