@@ -23,6 +23,9 @@ name: Test
 # whose refs/pull/<n>/merge would be refused. A workflow_dispatch from another branch fails at the
 # OpenBao login for the same reason.
 #
+# In a fork outside actions-fyi, every job is skipped by the same if: a fork's push gets none of the
+# secrets, and its OIDC token names the fork, not this repository, so OpenBao refuses it.
+#
 # It is still triggered on pull_request, but every job is skipped there by its own if. A required
 # check needs a check run on the pull request before the pull request can join the merge queue:
 # without a run, Integration Results stays "Expected" for good. A job skipped by its if reports a
@@ -52,7 +55,7 @@ defaults:
 jobs:
   texts:
     name: Integration Texts
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && github.repository_owner == 'actions-fyi'
     runs-on: ubuntu-24.04-firewall
     permissions:
       contents: read # The egress firewall reads .github/egress-firewall.yaml with this token
@@ -86,7 +89,7 @@ jobs:
 
   integration:
     name: Integration
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && github.repository_owner == 'actions-fyi'
     needs: texts
     # The called job can only get the permissions given here.
     permissions:
@@ -112,7 +115,7 @@ jobs:
 
   results:
     name: Integration Results
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && github.repository_owner == 'actions-fyi'
     needs: integration
     runs-on: ubuntu-24.04-firewall
     permissions:
